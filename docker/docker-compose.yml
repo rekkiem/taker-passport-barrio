@@ -1,13 +1,12 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    build: ../database
     environment:
       POSTGRES_DB: taker
       POSTGRES_USER: taker
       POSTGRES_PASSWORD: ${DB_PASSWORD:-takerpass2026}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../database:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     healthcheck:
