@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import axios from 'axios';
 import {
   MapPin, CheckCircle2, Loader2, Flower2, Paintbrush, Sparkles, Zap,
   Wrench, Truck, PawPrint, Hammer, Package,
 } from 'lucide-react';
-import { API_URL } from '../config/api';
+import { api } from '../config/api';
 
 const CATEGORY_ICON: Record<string, any> = {
   jardineria: Flower2,
@@ -29,7 +28,6 @@ const STATUS_LABEL: Record<string, { label: string; className: string }> = {
 
 export default function TaskCard({ task, onUpdate }: { task: any; onUpdate: () => void }) {
   const [loading, setLoading] = useState(false);
-  const token = localStorage.getItem('token');
   const Icon = CATEGORY_ICON[task.category?.toLowerCase()] || Package;
   const status = STATUS_LABEL[task.status] || { label: task.status, className: 'bg-paper2 text-ink/60' };
 
@@ -37,6 +35,8 @@ export default function TaskCard({ task, onUpdate }: { task: any; onUpdate: () =
     setLoading(true);
     try {
       await fn();
+    } catch {
+      // el interceptor de `api` ya muestra el error en el toast global
     } finally {
       setLoading(false);
     }
@@ -44,21 +44,13 @@ export default function TaskCard({ task, onUpdate }: { task: any; onUpdate: () =
 
   const handlePay = () =>
     withLoading(async () => {
-      const { data } = await axios.post(
-        `${API_URL}/payments/create`,
-        { taskId: task.id },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const { data } = await api.post('/payments/create', { taskId: task.id });
       window.location.href = data.mockUrl;
     });
 
   const handleConfirm = () =>
     withLoading(async () => {
-      await axios.post(
-        `${API_URL}/tasks/${task.id}/confirm`,
-        { rating: 5 },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await api.post(`/tasks/${task.id}/confirm`, { rating: 5 });
       onUpdate();
     });
 

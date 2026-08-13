@@ -42,11 +42,18 @@ services:
     container_name: evolution_api
     restart: unless-stopped
     environment:
+      - SERVER_URL=http://localhost:8081
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-default}
+      - DATABASE_ENABLED=false
+      - DEL_INSTANCE=false
       - CACHE_REDIS_ENABLED=true
       - CACHE_REDIS_URI=redis://redis:6379
       - CACHE_REDIS_SAVE_INSTANCES=false
       - CACHE_LOCAL_ENABLED=false
+      - CORS_ORIGIN=*
+      - CORS_METHODS=POST,GET,PUT,DELETE
+      - CORS_CREDENTIALS=true
+      - LOG_LEVEL=ERROR,WARN
     ports:
       - "8081:8080"
     volumes:

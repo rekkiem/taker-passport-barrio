@@ -1,7 +1,8 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import {
-  MessageCircle, ArrowRight, Flower2, Paintbrush, Sparkles, Zap, Wrench, Truck,
+  ArrowRight, MessageCircle, Flower2, Paintbrush, Sparkles, Zap, Wrench, Truck,
 } from 'lucide-react';
+import AuthModal from '../components/LoginModal';
 
 const CATEGORIES = [
   { name: 'Jardinería', icon: Flower2 },
@@ -19,7 +20,7 @@ const STEPS = [
 ];
 
 export default function LandingPage() {
-  const waLink = 'https://wa.me/?text=Hola!%20Quiero%20usar%20TakerPass%20Barrio';
+  const [authRole, setAuthRole] = useState<null | 'giver' | 'taker'>(null);
 
   return (
     <div>
@@ -44,21 +45,22 @@ export default function LandingPage() {
             no por estrellas infladas. Pago protegido hasta que el trabajo esté hecho.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a
-              href={waLink}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => setAuthRole('giver')}
               className="bg-paper text-azulejo-dark px-7 py-3.5 rounded-full font-display font-bold hover:bg-white transition flex items-center justify-center gap-2"
             >
-              <MessageCircle size={20} /> Empezar por WhatsApp
-            </a>
-            <Link
-              to="/giver"
+              Publicar una tarea <ArrowRight size={18} />
+            </button>
+            <button
+              onClick={() => setAuthRole('taker')}
               className="bg-marigold text-ink px-7 py-3.5 rounded-full font-display font-bold hover:bg-marigold-dark transition flex items-center justify-center gap-2"
             >
-              Publicar una tarea <ArrowRight size={18} />
-            </Link>
+              <Wrench size={18} /> Quiero trabajar
+            </button>
           </div>
+          <p className="flex items-center justify-center gap-1.5 text-paper/60 text-xs mt-5">
+            <MessageCircle size={14} /> Recibirás avisos de tus tareas directo por WhatsApp
+          </p>
         </div>
       </section>
 
@@ -69,14 +71,14 @@ export default function LandingPage() {
         </h2>
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {CATEGORIES.map(({ name, icon: Icon }) => (
-            <Link
+            <button
               key={name}
-              to="/giver"
+              onClick={() => setAuthRole('giver')}
               className="flex flex-col items-center gap-2 p-4 bg-white border border-linea rounded-card hover:border-azulejo hover:-translate-y-0.5 transition text-center"
             >
               <Icon size={22} className="text-azulejo" />
               <span className="text-xs font-semibold text-ink/80">{name}</span>
-            </Link>
+            </button>
           ))}
         </div>
       </section>
@@ -108,9 +110,9 @@ export default function LandingPage() {
               un historial verificable: tareas completadas, tasa de cumplimiento y
               calificación real de vecinos que ya lo contrataron.
             </p>
-            <Link to="/taker" className="inline-flex items-center gap-2 font-semibold text-azulejo hover:text-azulejo-dark">
+            <button onClick={() => setAuthRole('taker')} className="inline-flex items-center gap-2 font-semibold text-azulejo hover:text-azulejo-dark">
               Quiero construir mi Passport <ArrowRight size={16} />
-            </Link>
+            </button>
           </div>
           <div className="stamp-card">
             <div className="bg-azulejo-dark text-paper rounded-card p-6 shadow-lg -rotate-1">
@@ -135,6 +137,17 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {authRole && (
+        <AuthModal
+          onClose={() => setAuthRole(null)}
+          onLogin={() => {
+            window.location.href = authRole === 'giver' ? '/giver' : '/taker';
+          }}
+          initialRole={authRole}
+          initialRegister
+        />
+      )}
     </div>
   );
 }

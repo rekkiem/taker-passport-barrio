@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Plus, X, ClipboardList } from 'lucide-react';
 import TaskCard from '../components/TaskCard';
-import { API_URL } from '../config/api';
+import { api } from '../config/api';
 
 const inputClass =
   'w-full p-3 bg-paper border border-linea rounded-xl placeholder:text-ink/40 focus:border-azulejo focus:ring-0 transition';
@@ -10,9 +9,11 @@ const inputClass =
 export default function GiverDashboard() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ category: '', description: '', location: 'Providencia', budget: '' });
   const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchTasks();
@@ -20,23 +21,30 @@ export default function GiverDashboard() {
 
   const fetchTasks = async () => {
     setLoading(true);
-    const token = localStorage.getItem('token');
-    const { data } = await axios.get(`${API_URL}/tasks`, { headers: { Authorization: `Bearer ${token}` } });
-    setTasks(data);
-    setLoading(false);
+    setLoadError(false);
+    try {
+      const { data } = await api.get('/tasks');
+      setTasks(data);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
-    const token = localStorage.getItem('token');
+    setSubmitting(true);
     try {
-      await axios.post(`${API_URL}/tasks`, { ...form, budget: Number(form.budget) }, { headers: { Authorization: `Bearer ${token}` } });
+      await api.post('/tasks', { ...form, budget: Number(form.budget) });
       setShowForm(false);
       setForm({ category: '', description: '', location: 'Providencia', budget: '' });
       fetchTasks();
     } catch (err: any) {
       setFormError(err.response?.data?.error || 'No se pudo publicar la tarea');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -101,8 +109,8 @@ export default function GiverDashboard() {
             </div>
           </div>
           <div className="flex gap-2 pt-1">
-            <button type="submit" className="bg-marigold text-ink px-6 py-2.5 rounded-full font-semibold hover:bg-marigold-dark transition">
-              Publicar tarea
+            <button type="submit" disabled={submitting} className="bg-marigold text-ink px-6 py-2.5 rounded-full font-semibold hover:bg-marigold-dark transition disabled:opacity-60">
+              {submitting ? 'Publicando…' : 'Publicar tarea'}
             </button>
             <button type="button" onClick={() => setShowForm(false)} className="text-ink/50 px-6 py-2.5 hover:text-ink">
               Cancelar
@@ -113,6 +121,13 @@ export default function GiverDashboard() {
 
       {loading ? (
         <div className="text-center py-16 text-ink/40">Cargando tus tareas…</div>
+      ) : loadError ? (
+        <div className="text-center py-16 border border-dashed border-ladrillo/40 rounded-card">
+          <p className="font-display font-semibold text-ladrillo mb-1">No se pudieron cargar tus tareas</p>
+          <button onClick={fetchTasks} className="text-azulejo font-semibold text-sm hover:text-azulejo-dark">
+            Reintentar
+          </button>
+        </div>
       ) : tasks.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-linea rounded-card">
           <ClipboardList className="mx-auto mb-3 text-ink/30" size={32} />

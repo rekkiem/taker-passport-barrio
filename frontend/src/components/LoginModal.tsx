@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import axios from 'axios';
 import { X, HandHelping, Wrench, Users, Loader2 } from 'lucide-react';
-import { API_URL } from '../config/api';
+import { api } from '../config/api';
 
 const ROLES = [
   { value: 'giver', label: 'Necesito ayuda', hint: 'Publicar tareas', icon: HandHelping },
@@ -12,9 +11,19 @@ const ROLES = [
 const inputClass =
   'w-full p-3 bg-paper border border-linea rounded-xl placeholder:text-ink/40 focus:border-azulejo focus:ring-0 transition';
 
-export default function AuthModal({ onClose, onLogin }: { onClose: () => void; onLogin: (u: any) => void }) {
-  const [isRegister, setIsRegister] = useState(false);
-  const [form, setForm] = useState({ rut: '', name: '', email: '', phone: '', password: '', role: 'giver' });
+export default function AuthModal({
+  onClose,
+  onLogin,
+  initialRole = 'giver',
+  initialRegister = false,
+}: {
+  onClose: () => void;
+  onLogin: (u: any) => void;
+  initialRole?: string;
+  initialRegister?: boolean;
+}) {
+  const [isRegister, setIsRegister] = useState(initialRegister);
+  const [form, setForm] = useState({ rut: '', name: '', email: '', phone: '', password: '', role: initialRole });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +34,7 @@ export default function AuthModal({ onClose, onLogin }: { onClose: () => void; o
     try {
       const endpoint = isRegister ? '/auth/register' : '/auth/login';
       const payload = isRegister ? form : { email: form.email, password: form.password };
-      const { data } = await axios.post(`${API_URL}${endpoint}`, payload);
+      const { data } = await api.post(endpoint, payload);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       onLogin(data.user);

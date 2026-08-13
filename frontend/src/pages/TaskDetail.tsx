@@ -1,8 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import { ArrowLeft, MapPin, Clock } from 'lucide-react';
-import { API_URL } from '../config/api';
+import { api } from '../config/api';
 
 export default function TaskDetail() {
   const { id } = useParams();
@@ -15,11 +14,14 @@ export default function TaskDetail() {
   }, [id]);
 
   const fetchTask = async () => {
-    const token = localStorage.getItem('token');
-    const { data } = await axios.get(`${API_URL}/tasks`, { headers: { Authorization: `Bearer ${token}` } });
-    const found = data.find((t: any) => t.id === id);
-    if (!found) setNotFound(true);
-    setTask(found);
+    try {
+      const { data } = await api.get('/tasks');
+      const found = data.find((t: any) => t.id === id);
+      if (!found) setNotFound(true);
+      setTask(found);
+    } catch {
+      setNotFound(true);
+    }
   };
 
   if (notFound) {

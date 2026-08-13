@@ -49,6 +49,18 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+// Nota: esta API no sirve nada en "/" — el frontend vive en :8080, este backend
+// solo expone /api/*. Esta ruta es únicamente para que quien entre por error
+// a localhost:4000 entienda qué está viendo, en vez de un 404 confuso.
+app.get('/', (_req, res) => {
+  res.json({
+    service: 'Taker Passport Barrio API',
+    status: 'running',
+    frontend: process.env.FRONTEND_URL || 'http://localhost:8080',
+    docs: '/health, /api/auth, /api/tasks, /api/passport, /api/payments, /api/ratings, /api/users',
+  });
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

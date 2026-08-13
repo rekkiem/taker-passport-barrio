@@ -7,6 +7,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Activa la nueva versión del Service Worker de inmediato en vez de
+        // esperar a que se cierren todas las pestañas — evita que quede
+        // "pegada" una build vieja en caché tras cada despliegue.
+        skipWaiting: true,
+        clientsClaim: true,
+      },
       manifest: {
         name: 'Taker Passport Barrio',
         short_name: 'TakerPass',

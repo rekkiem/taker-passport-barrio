@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { MapPin, CheckCircle2, Search, PackageSearch } from 'lucide-react';
+import { MapPin, CheckCircle2, Search, PackageSearch, Loader2 } from 'lucide-react';
 import PassportView from '../components/PassportView';
-import { API_URL } from '../config/api';
+import { api } from '../config/api';
 
 export default function TakerDashboard() {
   const [tasks, setTasks] = useState<any[]>([]);
@@ -10,7 +9,9 @@ export default function TakerDashboard() {
   const [filter, setFilter] = useState('Providencia');
   const [query, setQuery] = useState('');
   const [applied, setApplied] = useState<Record<string, boolean>>({});
+  const [applying, setApplying] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
@@ -21,26 +22,37 @@ export default function TakerDashboard() {
 
   const fetchAvailableTasks = async () => {
     setLoading(true);
-    const token = localStorage.getItem('token');
-    const { data } = await axios.get(`${API_URL}/tasks?status=open&location=${filter}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setTasks(data);
-    setLoading(false);
+    setLoadError(false);
+    try {
+      const { data } = await api.get(`/tasks?status=open&location=${filter}`);
+      setTasks(data);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchPassport = async () => {
-    const token = localStorage.getItem('token');
-    const { data } = await axios.get(`${API_URL}/passport/${user.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setPassport(data);
+    try {
+      const { data } = await api.get(`/passport/${user.id}`);
+      setPassport(data);
+    } catch {
+      // no bloquea el resto del panel si el passport falla en cargar
+    }
   };
 
   const handleApply = async (taskId: string) => {
-    const token = localStorage.getItem('token');
-    await axios.post(`${API_URL}/tasks/${taskId}/apply`, {}, { headers: { Authorization: `Bearer ${token}` } });
-    setApplied((prev) => ({ ...prev, [taskId]: true }));
+    setApplying((prev) => ({ ...prev, [taskId]: true }));
+    try {
+      await api.post(`/tasks/${taskId}/apply`, {});
+      setApplied((prev) => ({ ...prev, [taskId]: true }));
+    } catch {
+      // el interceptor de `api` ya muestra el error real en el toast
+      // (ej: "Tarea no disponible", "No puedes postular a tu propia tarea")
+    } finally {
+      setApplying((prev) => ({ ...prev, [taskId]: false }));
+    }
   };
 
   const visibleTasks = tasks.filter(
@@ -86,6 +98,13 @@ export default function TakerDashboard() {
 
           {loading ? (
             <div className="text-center py-16 text-ink/40">Buscando tareas en {filter}…</div>
+          ) : loadError ? (
+            <div className="text-center py-16 border border-dashed border-ladrillo/40 rounded-card">
+              <p className="font-display font-semibold text-ladrillo mb-1">No se pudieron cargar las tareas</p>
+              <button onClick={fetchAvailableTasks} className="text-azulejo font-semibold text-sm hover:text-azulejo-dark">
+                Reintentar
+              </button>
+            </div>
           ) : visibleTasks.length === 0 ? (
             <div className="text-center py-16 border border-dashed border-linea rounded-card">
               <PackageSearch className="mx-auto mb-3 text-ink/30" size={32} />
@@ -108,14 +127,16 @@ export default function TakerDashboard() {
                   </div>
                   <button
                     onClick={() => handleApply(task.id)}
-                    disabled={applied[task.id]}
+                    disabled={applied[task.id] || applying[task.id]}
                     className={`shrink-0 px-4 py-2 rounded-full text-sm font-semibold transition flex items-center gap-1 ${
                       applied[task.id]
                         ? 'bg-azulejo/10 text-azulejo cursor-default'
-                        : 'bg-azulejo text-paper hover:bg-azulejo-dark'
+                        : 'bg-azulejo text-paper hover:bg-azulejo-dark disabled:opacity-60'
                     }`}
                   >
-                    {applied[task.id] ? (
+                    {applying[task.id] ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : applied[task.id] ? (
                       <>
                         <CheckCircle2 size={14} /> Enviada
                       </>
