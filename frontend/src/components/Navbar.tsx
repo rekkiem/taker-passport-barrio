@@ -1,11 +1,26 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { Menu, X, User } from 'lucide-react';
-import LoginModal from './LoginModal';
+import { Menu, X, LogOut, BadgeCheck } from 'lucide-react';
+import AuthModal from './LoginModal';
+
+function Logo() {
+  return (
+    <span className="flex items-center gap-2">
+      <svg width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="8" className="fill-azulejo" />
+        <path d="M8 20L16 10L24 20" stroke="#EFEDE2" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="16" cy="22.5" r="2" className="fill-marigold" />
+      </svg>
+      <span className="font-display font-extrabold text-lg tracking-tight text-ink">
+        TakerPass <span className="text-azulejo">Barrio</span>
+      </span>
+    </span>
+  );
+}
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
   const navigate = useNavigate();
 
@@ -23,40 +38,71 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
+      <nav className="sticky top-0 z-40 bg-paper/90 backdrop-blur border-b border-linea">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex justify-between items-center h-16">
             <Link to="/" className="flex items-center">
-              <span className="text-2xl font-bold text-primary">TakerPass</span>
-              <span className="ml-2 text-xs bg-accent text-white px-2 py-0.5 rounded-full">Barrio</span>
+              <Logo />
             </Link>
 
-            <div className="hidden md:flex items-center space-x-4">
+            <div className="hidden md:flex items-center gap-2">
               {user ? (
                 <>
-                  <Link to={user.role === 'giver' ? '/giver' : '/taker'} className="text-gray-700 hover:text-primary">
-                    Dashboard
+                  <span className="hidden lg:flex items-center gap-1 text-sm text-ink/70 mr-2">
+                    <BadgeCheck size={16} className="text-azulejo" /> Hola, {user.name?.split(' ')[0]}
+                  </span>
+                  <Link
+                    to={user.role === 'taker' ? '/taker' : '/giver'}
+                    className="px-4 py-2 rounded-full text-sm font-semibold text-ink hover:bg-paper2 transition"
+                  >
+                    Mi panel
                   </Link>
-                  <button onClick={handleLogout} className="text-gray-500 hover:text-red-500">
-                    <User size={20} />
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-semibold text-ladrillo hover:bg-ladrillo-light transition"
+                  >
+                    <LogOut size={16} /> Salir
                   </button>
                 </>
               ) : (
-                <button onClick={() => setShowLogin(true)} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-sky-600">
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="bg-azulejo text-paper px-5 py-2.5 rounded-full font-semibold text-sm hover:bg-azulejo-dark transition shadow-stamp"
+                >
                   Ingresar
                 </button>
               )}
             </div>
 
-            <div className="md:hidden flex items-center">
-              <button onClick={() => setIsOpen(!isOpen)}>
-                {isOpen ? <X size={24} /> : <Menu size={24} />}
-              </button>
-            </div>
+            <button className="md:hidden" onClick={() => setIsOpen(!isOpen)} aria-label="Abrir menú">
+              {isOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
           </div>
+
+          {isOpen && (
+            <div className="md:hidden pb-4 flex flex-col gap-2">
+              {user ? (
+                <>
+                  <Link to={user.role === 'taker' ? '/taker' : '/giver'} className="px-3 py-2 rounded-lg hover:bg-paper2" onClick={() => setIsOpen(false)}>
+                    Mi panel
+                  </Link>
+                  <button onClick={handleLogout} className="text-left px-3 py-2 rounded-lg text-ladrillo hover:bg-ladrillo-light">
+                    Cerrar sesión
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => { setShowAuth(true); setIsOpen(false); }}
+                  className="bg-azulejo text-paper px-4 py-2.5 rounded-full font-semibold text-sm"
+                >
+                  Ingresar
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </nav>
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} onLogin={setUser} />}
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onLogin={setUser} />}
     </>
   );
 }

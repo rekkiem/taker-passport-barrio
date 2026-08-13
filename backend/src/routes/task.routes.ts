@@ -2,10 +2,12 @@ import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { authMiddleware, AuthRequest } from '../middleware/auth.js';
 import { notifyTaskAssigned, notifyNewApplicant } from '../services/evolution.service.js';
+import { validateBody } from '../middleware/validate.js';
+import { createTaskSchema, assignTaskSchema, confirmTaskSchema } from '../schemas/index.js';
 
 const router = Router();
 
-router.post('/', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/', authMiddleware, validateBody(createTaskSchema), async (req: AuthRequest, res) => {
   try {
     const { category, description, location, budget } = req.body;
     const giverId = req.user.id;
@@ -64,7 +66,7 @@ router.post('/:id/apply', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/assign', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/:id/assign', authMiddleware, validateBody(assignTaskSchema), async (req: AuthRequest, res) => {
   try {
     const { takerId } = req.body;
     const taskId = req.params.id;
@@ -87,9 +89,15 @@ router.post('/:id/assign', authMiddleware, async (req: AuthRequest, res) => {
 router.post('/:id/complete', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const taskId = req.params.id;
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1 AND taker_id = $2', [taskId, req.user.id]);
+    if (task.rows.length === 0) return res.status(404).json({ error: 'Tarea no encontrada o no autorizado' });
+    if (task.rows[0].status !== 'assigned') {
+      return res.status(400).json({ error: `No se puede completar una tarea en estado "${task.rows[0].status}"` });
+    }
+
     await pool.query(
-      "UPDATE tasks SET status = 'completed', completed_at = NOW() WHERE id = $1 AND taker_id = $2",
-      [taskId, req.user.id]
+      "UPDATE tasks SET status = 'completed', completed_at = NOW() WHERE id = $1",
+      [taskId]
     );
     res.json({ message: 'Tarea marcada como completada' });
   } catch (e) {
@@ -97,13 +105,22 @@ router.post('/:id/complete', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/confirm', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/:id/confirm', authMiddleware, validateBody(confirmTaskSchema), async (req: AuthRequest, res) => {
   try {
     const taskId = req.params.id;
     const { rating, comment } = req.body;
 
     const task = await pool.query('SELECT * FROM tasks WHERE id = $1 AND giver_id = $2', [taskId, req.user.id]);
     if (task.rows.length === 0) return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (task.rows[0].status !== 'completed') {
+      return res.status(400).json({ error: `No se puede confirmar una tarea en estado "${task.rows[0].status}"` });
+    }
+
+    // Solo libera el pago si efectivamente está retenido (evita liberar pagos ya liberados o inexistentes)
+    const payment = await pool.query("SELECT * FROM payments WHERE task_id = $1 AND status = 'held'", [taskId]);
+    if (payment.rows.length === 0) {
+      return res.status(400).json({ error: 'No hay un pago retenido (held) para esta tarea' });
+    }
 
     await pool.query(
       "UPDATE tasks SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1",

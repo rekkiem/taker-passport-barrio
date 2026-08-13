@@ -10,7 +10,9 @@ export default defineConfig({
       manifest: {
         name: 'Taker Passport Barrio',
         short_name: 'TakerPass',
-        theme_color: '#0ea5e9',
+        description: 'El vecino de confianza que necesitas — Providencia y Ñuñoa',
+        theme_color: '#2F6B57',
+        background_color: '#EFEDE2',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }

@@ -3,5 +3,62 @@
 @tailwind utilities;
 
 @layer base {
-  body { @apply bg-gray-50 text-gray-900; }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  /* Foco de teclado visible siempre — accesibilidad, no decoración */
+  :focus-visible {
+    outline: 3px solid theme('colors.marigold.DEFAULT');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Tarjeta con muesca de "boleta" en el borde izquierdo — referencia directa
+     a la boleta SII, motivo cultural real del dominio, no decoración gratuita. */
+  .ticket {
+    position: relative;
+    background: #fff;
+    border: 1px solid theme('colors.linea');
+    border-radius: theme('borderRadius.card');
+  }
+  .ticket::before,
+  .ticket::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: theme('colors.paper');
+    border: 1px solid theme('colors.linea');
+    border-radius: 999px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .ticket::before { left: -10px; }
+  .ticket::after { right: -10px; }
+
+  /* Sello circular de reputación — el elemento signature del Passport,
+     inspirado en un timbre de visación/feria, no un ícono genérico. */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    width: 5.5rem;
+    height: 5.5rem;
+    border-radius: 999px;
+    border: 3px double currentColor;
+    transform: rotate(-6deg);
+  }
 }

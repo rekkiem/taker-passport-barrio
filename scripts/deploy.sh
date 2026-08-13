@@ -26,7 +26,20 @@ cd "$(dirname "$0")/../docker"
 
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo "⚠️  Archivo .env creado desde .env.example. Revisa las credenciales."
+    # Genera secretos aleatorios en vez de dejar los valores públicos del .env.example
+    if command -v openssl &> /dev/null; then
+        NEW_JWT=$(openssl rand -hex 32)
+        NEW_DB_PASS=$(openssl rand -hex 16)
+        NEW_MINIO_PASS=$(openssl rand -hex 16)
+        sed -i.bak "s/^JWT_SECRET=.*/JWT_SECRET=${NEW_JWT}/" .env
+        sed -i.bak "s/^DB_PASSWORD=.*/DB_PASSWORD=${NEW_DB_PASS}/" .env
+        sed -i.bak "s/^MINIO_PASSWORD=.*/MINIO_PASSWORD=${NEW_MINIO_PASS}/" .env
+        rm -f .env.bak
+        echo "🔐 Archivo .env creado con secretos generados aleatoriamente."
+    else
+        echo "⚠️  Archivo .env creado desde .env.example. openssl no está disponible:"
+        echo "   CAMBIA MANUALMENTE JWT_SECRET, DB_PASSWORD y MINIO_PASSWORD antes de exponer a internet."
+    fi
 fi
 
 echo "   Bajando servicios anteriores (si existen)..."
@@ -39,9 +52,10 @@ echo ""
 echo "✅ Despliegue completado!"
 echo ""
 echo "📱 Accesos:"
-echo "   Frontend PWA:     http://localhost"
+echo "   Frontend PWA:     http://localhost:8080"
 echo "   Backend API:      http://localhost:4000"
 echo "   MinIO Console:    http://localhost:9001  (minioadmin / minioadmin)"
+echo "   Evolution API:    http://localhost:8081"
 echo ""
 echo "🧪 Credenciales de prueba:"
 echo "   Giver:  ana@example.com      / password123"

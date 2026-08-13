@@ -1,12 +1,24 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { pool } from '../config/database.js';
 import { validateRut } from '../utils/rut.js';
+import { validateBody } from '../middleware/validate.js';
+import { registerSchema, loginSchema } from '../schemas/index.js';
 
 const router = Router();
 
-router.post('/register', async (req, res) => {
+// Límite estricto en endpoints de autenticación para mitigar fuerza bruta / credential stuffing
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Intenta nuevamente en unos minutos.' },
+});
+
+router.post('/register', authLimiter, validateBody(registerSchema), async (req, res) => {
   try {
     const { rut, name, email, phone, password, role } = req.body;
 
@@ -36,7 +48,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, validateBody(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await pool.query('SELECT * FROM users WHERE email = $1 OR phone = $1', [email]);

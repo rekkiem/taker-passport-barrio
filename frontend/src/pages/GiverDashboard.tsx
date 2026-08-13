@@ -1,70 +1,134 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Plus, DollarSign } from 'lucide-react';
+import { Plus, X, ClipboardList } from 'lucide-react';
 import TaskCard from '../components/TaskCard';
 import { API_URL } from '../config/api';
 
+const inputClass =
+  'w-full p-3 bg-paper border border-linea rounded-xl placeholder:text-ink/40 focus:border-azulejo focus:ring-0 transition';
+
 export default function GiverDashboard() {
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ category: '', description: '', location: 'Providencia', budget: '' });
+  const [formError, setFormError] = useState('');
 
-  useEffect(() => { fetchTasks(); }, []);
+  useEffect(() => {
+    fetchTasks();
+  }, []);
 
   const fetchTasks = async () => {
+    setLoading(true);
     const token = localStorage.getItem('token');
     const { data } = await axios.get(`${API_URL}/tasks`, { headers: { Authorization: `Bearer ${token}` } });
     setTasks(data);
+    setLoading(false);
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
     const token = localStorage.getItem('token');
-    await axios.post(`${API_URL}/tasks`, form, { headers: { Authorization: `Bearer ${token}` } });
-    setShowForm(false);
-    setForm({ category: '', description: '', location: 'Providencia', budget: '' });
-    fetchTasks();
+    try {
+      await axios.post(`${API_URL}/tasks`, { ...form, budget: Number(form.budget) }, { headers: { Authorization: `Bearer ${token}` } });
+      setShowForm(false);
+      setForm({ category: '', description: '', location: 'Providencia', budget: '' });
+      fetchTasks();
+    } catch (err: any) {
+      setFormError(err.response?.data?.error || 'No se pudo publicar la tarea');
+    }
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-4">
+    <div className="max-w-5xl mx-auto p-4 sm:p-6">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Panel Giver</h1>
-        <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg flex items-center gap-2">
-          <Plus size={20} /> Nueva Tarea
+        <div>
+          <p className="font-mono text-xs uppercase tracking-widest text-azulejo mb-1">Panel Giver</p>
+          <h1 className="font-display font-extrabold text-3xl">Tus tareas</h1>
+        </div>
+        <button
+          onClick={() => setShowForm(true)}
+          className="bg-azulejo text-paper px-4 py-2.5 rounded-full font-semibold flex items-center gap-2 hover:bg-azulejo-dark transition"
+        >
+          <Plus size={18} /> Nueva tarea
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-white p-6 rounded-2xl shadow-sm mb-8 space-y-4">
-          <h3 className="text-lg font-bold">Nueva Tarea</h3>
-          <input type="text" placeholder="Categoría (ej: Jardinería)" className="w-full p-3 border rounded-lg"
-            value={form.category} onChange={e => setForm({...form, category: e.target.value})} required />
-          <textarea placeholder="Describe tu tarea..." className="w-full p-3 border rounded-lg"
-            value={form.description} onChange={e => setForm({...form, description: e.target.value})} required />
-          <div className="flex gap-4">
-            <select className="flex-1 p-3 border rounded-lg" value={form.location} onChange={e => setForm({...form, location: e.target.value})}>
+        <form onSubmit={handleCreate} className="ticket p-6 mb-8 space-y-3 relative">
+          <button type="button" onClick={() => setShowForm(false)} className="absolute top-4 right-4 text-ink/40 hover:text-ink" aria-label="Cerrar">
+            <X size={18} />
+          </button>
+          <h3 className="font-display font-bold text-lg mb-1">Describe tu tarea</h3>
+          {formError && <div className="bg-ladrillo-light text-ladrillo p-3 rounded-lg text-sm">{formError}</div>}
+          <input
+            type="text"
+            placeholder="Categoría (ej: Jardinería)"
+            className={inputClass}
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            required
+          />
+          <textarea
+            placeholder="¿Qué necesitas? Sé específico: tamaño, materiales, urgencia..."
+            className={inputClass}
+            rows={3}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            required
+          />
+          <div className="flex gap-3">
+            <select
+              className={`flex-1 ${inputClass}`}
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+            >
               <option value="Providencia">Providencia</option>
               <option value="Ñuñoa">Ñuñoa</option>
             </select>
             <div className="flex-1 relative">
-              <DollarSign className="absolute left-3 top-3 text-gray-400" size={20} />
-              <input type="number" placeholder="Presupuesto (CLP)" className="w-full p-3 pl-10 border rounded-lg"
-                value={form.budget} onChange={e => setForm({...form, budget: e.target.value})} required />
+              <span className="absolute left-3 top-3.5 text-ink/40 font-mono text-sm">CLP</span>
+              <input
+                type="number"
+                placeholder="Presupuesto"
+                className={`${inputClass} pl-12`}
+                value={form.budget}
+                onChange={(e) => setForm({ ...form, budget: e.target.value })}
+                min={1}
+                required
+              />
             </div>
           </div>
-          <div className="flex gap-2">
-            <button type="submit" className="bg-accent text-white px-6 py-2 rounded-lg">Publicar</button>
-            <button type="button" onClick={() => setShowForm(false)} className="text-gray-500 px-6 py-2">Cancelar</button>
+          <div className="flex gap-2 pt-1">
+            <button type="submit" className="bg-marigold text-ink px-6 py-2.5 rounded-full font-semibold hover:bg-marigold-dark transition">
+              Publicar tarea
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="text-ink/50 px-6 py-2.5 hover:text-ink">
+              Cancelar
+            </button>
           </div>
         </form>
       )}
 
-      <div className="grid gap-4">
-        {tasks.map((task: any) => (
-          <TaskCard key={task.id} task={task} onUpdate={fetchTasks} />
-        ))}
-      </div>
+      {loading ? (
+        <div className="text-center py-16 text-ink/40">Cargando tus tareas…</div>
+      ) : tasks.length === 0 ? (
+        <div className="text-center py-16 border border-dashed border-linea rounded-card">
+          <ClipboardList className="mx-auto mb-3 text-ink/30" size={32} />
+          <p className="font-display font-semibold text-ink/70 mb-1">Aún no has publicado nada</p>
+          <p className="text-ink/50 text-sm mb-4">Publica tu primera tarea y recibe postulantes de tu barrio.</p>
+          <button onClick={() => setShowForm(true)} className="text-azulejo font-semibold text-sm hover:text-azulejo-dark">
+            Publicar mi primera tarea →
+          </button>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {tasks.map((task: any) => (
+            <TaskCard key={task.id} task={task} onUpdate={fetchTasks} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

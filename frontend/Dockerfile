@@ -1,8 +1,8 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package*.json tsconfig*.json vite.config.ts tailwind.config.js index.html ./
+COPY package*.json ./
 RUN npm install
-COPY src ./src
+COPY . .
 RUN npm run build
 
 FROM nginx:alpine
