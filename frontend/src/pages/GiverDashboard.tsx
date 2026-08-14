@@ -23,7 +23,7 @@ export default function GiverDashboard() {
     setLoading(true);
     setLoadError(false);
     try {
-      const { data } = await api.get('/tasks');
+      const { data } = await api.get('/tasks?mine=giver');
       setTasks(data);
     } catch {
       setLoadError(true);

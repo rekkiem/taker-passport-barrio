@@ -42,6 +42,12 @@ cd taker-passport-barrio
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 
+#2.2 Despliegue Manual
+cd .\docker\
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
+
 # 3. Cargar datos de prueba (opcional, para demo)
 docker exec -i $(docker ps -qf "name=postgres") \
   psql -U taker -d taker < database/seeds/test_data.sql

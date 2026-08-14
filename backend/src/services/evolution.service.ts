@@ -8,8 +8,9 @@ export async function sendWhatsAppMessage(phone: string, message: string) {
     await axios.post(`${EVOLUTION_URL}/message/sendText`, {
       number: phone.replace('+', ''),
       text: message,
-    }, {
-      headers: { 'apikey': API_KEY }
+  }, {
+      headers: { 'apikey': API_KEY },
+      timeout: 3000,
     });
   } catch (e) {
     console.error('Error enviando WhatsApp:', e);

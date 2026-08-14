@@ -15,10 +15,8 @@ export default function TaskDetail() {
 
   const fetchTask = async () => {
     try {
-      const { data } = await api.get('/tasks');
-      const found = data.find((t: any) => t.id === id);
-      if (!found) setNotFound(true);
-      setTask(found);
+      const { data } = await api.get(`/tasks/${id}`);
+      setTask(data);
     } catch {
       setNotFound(true);
     }

@@ -3,6 +3,7 @@ import LandingPage from './pages/LandingPage';
 import GiverDashboard from './pages/GiverDashboard';
 import TakerDashboard from './pages/TakerDashboard';
 import TaskDetail from './pages/TaskDetail';
+import PaymentReturn from './pages/PaymentReturn';
 import Navbar from './components/Navbar';
 import Toast from './components/Toast';
 import RequireAuth from './components/RequireAuth';
@@ -30,6 +31,7 @@ function App() {
           }
         />
         <Route path="/task/:id" element={<TaskDetail />} />
+        <Route path="/payment/return" element={<PaymentReturn />} />
       </Routes>
       <Toast />
     </div>

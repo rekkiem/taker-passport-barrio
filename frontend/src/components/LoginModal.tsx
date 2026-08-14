@@ -37,6 +37,7 @@ export default function AuthModal({
       const { data } = await api.post(endpoint, payload);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      window.dispatchEvent(new CustomEvent('auth:login', { detail: data.user }));
       onLogin(data.user);
       onClose();
     } catch (err: any) {

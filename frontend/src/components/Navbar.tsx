@@ -27,14 +27,30 @@ export default function Navbar() {
   useEffect(() => {
     const stored = localStorage.getItem('user');
     if (stored) setUser(JSON.parse(stored));
+    const onLogin = (event: Event) => setUser((event as CustomEvent).detail);
+    const onExpired = () => setUser(null);
+    window.addEventListener('auth:login', onLogin);
+    window.addEventListener('auth:expired', onExpired);
+    return () => {
+      window.removeEventListener('auth:login', onLogin);
+      window.removeEventListener('auth:expired', onExpired);
+    };
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    window.dispatchEvent(new CustomEvent('auth:logout'));
     setUser(null);
     navigate('/');
   };
+
+  const panelLinks = user?.role === 'both'
+    ? [
+        { to: '/giver', label: 'Panel Giver' },
+        { to: '/taker', label: 'Panel Taker' },
+      ]
+    : [{ to: user?.role === 'taker' ? '/taker' : '/giver', label: 'Mi panel' }];
 
   return (
     <>
@@ -51,12 +67,15 @@ export default function Navbar() {
                   <span className="hidden lg:flex items-center gap-1 text-sm text-ink/70 mr-2">
                     <BadgeCheck size={16} className="text-azulejo" /> Hola, {user.name?.split(' ')[0]}
                   </span>
-                  <Link
-                    to={user.role === 'taker' ? '/taker' : '/giver'}
-                    className="px-4 py-2 rounded-full text-sm font-semibold text-ink hover:bg-paper2 transition"
-                  >
-                    Mi panel
-                  </Link>
+                  {panelLinks.map((link) => (
+                    <Link
+                      key={link.to}
+                      to={link.to}
+                      className="px-4 py-2 rounded-full text-sm font-semibold text-ink hover:bg-paper2 transition"
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
                   <button
                     onClick={handleLogout}
                     className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-semibold text-ladrillo hover:bg-ladrillo-light transition"
@@ -83,9 +102,11 @@ export default function Navbar() {
             <div className="md:hidden pb-4 flex flex-col gap-2">
               {user ? (
                 <>
-                  <Link to={user.role === 'taker' ? '/taker' : '/giver'} className="px-3 py-2 rounded-lg hover:bg-paper2" onClick={() => setIsOpen(false)}>
-                    Mi panel
-                  </Link>
+                  {panelLinks.map((link) => (
+                    <Link key={link.to} to={link.to} className="px-3 py-2 rounded-lg hover:bg-paper2" onClick={() => setIsOpen(false)}>
+                      {link.label}
+                    </Link>
+                  ))}
                   <button onClick={handleLogout} className="text-left px-3 py-2 rounded-lg text-ladrillo hover:bg-ladrillo-light">
                     Cerrar sesión
                   </button>
