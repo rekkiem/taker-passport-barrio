@@ -42,11 +42,14 @@ cd taker-passport-barrio
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 
-#2.2 Despliegue Manual
+#2.2 Despliegue Manual (equivalente a lo que hace deploy.sh)
 cd .\docker\
-docker compose down -v
-docker compose build --no-cache
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Nota: sin el flag -f docker-compose.dev.yml los contenedores levantan
+# SIN ningún puerto publicado al host (así es como debe verse en producción,
+# ver docker-compose.prod.yml y docs/DEPLOY_VULTR.md).
 
 # 3. Cargar datos de prueba (opcional, para demo)
 docker exec -i $(docker ps -qf "name=postgres") \
@@ -89,7 +92,8 @@ taker-passport-barrio/
 ├── database/
 │   ├── migrations/001_initial.sql
 │   └── seeds/test_data.sql
-├── docker/                    # docker-compose.yml + nginx + .env.example
+├── docker/                    # docker-compose.yml (base) + .dev.yml / .prod.yml + .env.example
+├── deploy/                    # config de Nginx del host para producción (TLS)
 ├── docs/                      # API_REFERENCE.md, INSTALL.md
 └── scripts/                   # deploy.sh / deploy.ps1
 ```
@@ -126,27 +130,11 @@ npm test          # requiere Postgres accesible vía DATABASE_URL
 
 La suite incluye tests unitarios del validador de RUT y un test de integración end-to-end que ejercita el flujo completo (registro → tarea → postulación → asignación → pago → completar → confirmar → passport actualizado) contra una base PostgreSQL real, sin mocks.
 
-## 🌐 Despliegue en VPS Chile
+## 🌐 Despliegue en producción (Vultr)
 
-### 1. Preparar VPS
-```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
-```
+Guía completa paso a paso: [`docs/DEPLOY_VULTR.md`](docs/DEPLOY_VULTR.md).
 
-### 2. Clonar y desplegar
-```bash
-git clone https://github.com/rekkiem/taker-passport-barrio.git
-cd taker-passport-barrio
-./scripts/deploy.sh
-```
-
-### 3. SSL con Let's Encrypt
-
-`frontend` ya sirve la PWA vía su propio Nginx interno (con proxy de `/api` al backend) en el puerto `8080`. Para HTTPS en producción, coloca un Nginx o Caddy a nivel del **host** (fuera de Docker Compose) apuntando a `127.0.0.1:8080`, y usa certbot ahí:
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d tudominio.cl -d www.tudominio.cl
-```
+Resumen: `scripts/vultr-provision.sh` prepara el droplet (Docker, firewall, Nginx, Certbot) y `scripts/deploy-prod.sh tudominio.cl` levanta el stack completo con HTTPS. En producción ningún servicio queda expuesto directo a internet salvo el Nginx del host (puertos 80/443) — todo lo demás vive en `127.0.0.1` (ver `docker/docker-compose.prod.yml`).
 
 ## ⚠️ Notas Importantes
 

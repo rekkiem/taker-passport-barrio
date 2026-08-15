@@ -1,0 +1,37 @@
+# Nginx de HOST (fuera de Docker) para Taker Passport Barrio.
+# Reemplaza __DOMAIN__ por tu dominio real — scripts/deploy-prod.sh lo hace
+# automáticamente la primera vez.
+#
+# Deja este archivo tal cual, sin bloque HTTPS: cuando corras
+#   sudo certbot --nginx -d __DOMAIN__ -d www.__DOMAIN__
+# certbot edita este mismo archivo, agrega el `listen 443 ssl`, las rutas al
+# certificado y el redirect automático de 80 a 443. No hace falta escribirlo
+# a mano ni mantenerlo sincronizado.
+#
+# Por qué un Nginx de host y no uno dentro de docker-compose: certbot renueva
+# el certificado con el plugin estándar de Nginx sin pelear con la red interna
+# de Docker, y este queda como el único puerto público real del servidor —
+# todo lo demás (frontend, backend, DB, MinIO, Evolution API) vive en
+# 127.0.0.1, inalcanzable desde internet (ver docker-compose.prod.yml).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__ www.__DOMAIN__;
+
+    client_max_body_size 10m;
+
+    # Certbot usa esta ruta para validar el dominio. No la borres.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

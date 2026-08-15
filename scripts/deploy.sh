@@ -43,10 +43,10 @@ if [ ! -f .env ]; then
 fi
 
 echo "   Bajando servicios anteriores (si existen)..."
-$COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+$COMPOSE_CMD -f docker-compose.yml -f docker-compose.dev.yml down --remove-orphans 2>/dev/null || true
 
 echo "   Construyendo e iniciando servicios..."
-$COMPOSE_CMD up --build -d
+$COMPOSE_CMD -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
 echo ""
 echo "✅ Despliegue completado!"
@@ -63,4 +63,4 @@ echo "   Taker:  carlos@example.com   / password123"
 echo "   Both:   maria@example.com    / password123"
 echo ""
 echo "📊 Logs en tiempo real:"
-echo "   $COMPOSE_CMD logs -f backend"
+echo "   $COMPOSE_CMD -f docker-compose.yml -f docker-compose.dev.yml logs -f backend"

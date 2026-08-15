@@ -1,0 +1,35 @@
+# Overlay de DESARROLLO LOCAL. Publica cada servicio en el host tal como
+# antes, para poder inspeccionar Postgres/MinIO/Evolution directo desde tu
+# máquina. NO usar en un servidor con IP pública — para eso existe
+# docker-compose.prod.yml, que solo expone lo estrictamente necesario y
+# atado a 127.0.0.1.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# (scripts/deploy.sh ya hace esto automáticamente)
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  evolution-api:
+    ports:
+      - "8081:8080"
+
+  backend:
+    ports:
+      - "4000:4000"
+
+  frontend:
+    ports:
+      - "8080:80"

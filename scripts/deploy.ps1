@@ -31,8 +31,8 @@ if (-not (Test-Path .env)) {
     Write-Host "🔐 Archivo .env creado con secretos generados aleatoriamente." -ForegroundColor Green
 }
 
-docker-compose down
-docker-compose up --build -d
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
 Write-Host "✅ Despliegue completado!" -ForegroundColor Green
 Write-Host "📱 Frontend: http://localhost:8080"

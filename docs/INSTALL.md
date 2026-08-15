@@ -42,7 +42,9 @@ chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 ```
 
-El script genera automáticamente secretos aleatorios en `docker/.env` si el archivo no existe. Levanta: PostgreSQL, Redis, MinIO, Evolution API, backend, frontend y Nginx.
+El script genera automáticamente secretos aleatorios en `docker/.env` si el archivo no existe, y usa `docker-compose.yml` + `docker-compose.dev.yml` (puertos expuestos en el host para poder inspeccionar cada servicio). Levanta: PostgreSQL, Redis, MinIO, Evolution API, backend, frontend.
+
+Para producción en un VPS, el stack usa un overlay distinto (`docker-compose.prod.yml`, que ata todo a `127.0.0.1` salvo el Nginx del host) — ver [`docs/DEPLOY_VULTR.md`](DEPLOY_VULTR.md).
 
 ## Correr los tests
 
