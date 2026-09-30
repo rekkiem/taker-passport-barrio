@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const EVOLUTION_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
-const API_KEY = process.env.EVOLUTION_API_KEY || 'default';
+const API_KEY = process.env.EVOLUTION_API_KEY || (() => { throw new Error('EVOLUTION_API_KEY no configurado'); })();
 
 export async function sendWhatsAppMessage(phone: string, message: string) {
   try {

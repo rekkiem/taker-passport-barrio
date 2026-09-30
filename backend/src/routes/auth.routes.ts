@@ -17,8 +17,16 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Intenta nuevamente en unos minutos.' },
 });
+const authAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => {
+    const b = req.body || {};
+    return ((b.email||b.phone||b.rut||b.identifier||'')+'').toLowerCase().trim() || req.ip || 'unknown';
+  },
+  message: { error: 'Demasiados intentos para esta cuenta.' },
+});
 
-router.post('/register', authLimiter, validateBody(registerSchema), async (req, res) => {
+router.post('/register', authLimiter, authAccountLimiter, validateBody(registerSchema), async (req, res) => {
   try {
     const { rut, name, email, phone, password, role } = req.body;
 
@@ -48,7 +56,7 @@ router.post('/register', authLimiter, validateBody(registerSchema), async (req, 
   }
 });
 
-router.post('/login', authLimiter, validateBody(loginSchema), async (req, res) => {
+router.post('/login', authLimiter, authAccountLimiter, validateBody(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await pool.query('SELECT * FROM users WHERE email = $1 OR phone = $1', [email]);

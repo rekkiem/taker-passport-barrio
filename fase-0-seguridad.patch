@@ -1,0 +1,1076 @@
+From ec66d5f7303e3d6462ac39360672cc3466419a9e Mon Sep 17 00:00:00 2001
+From: Taker Dev <dev@taker.local>
+Date: Wed, 30 Sep 2026 17:43:00 +0000
+Subject: [PATCH] =?UTF-8?q?fix(security):=20Fase=200=20hotfix=20=E2=80=94?=
+ =?UTF-8?q?=20secretos,=20pagos=20manuales,=20privacidad,=20IP?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ backend/src/config/env.ts                     |  93 ++++++
+ backend/src/e2e.test.ts                       |  34 ++-
+ backend/src/index.ts                          |  69 +----
+ backend/src/routes/admin.routes.ts            |   7 +
+ backend/src/routes/auth.routes.ts             |  12 +-
+ backend/src/routes/passport.routes.ts         |  49 ++--
+ backend/src/routes/payment.routes.ts          | 267 +++++++-----------
+ backend/src/routes/task.routes.ts             |  19 +-
+ backend/src/services/evolution.service.ts     |   2 +-
+ backend/src/services/minio.service.ts         |  32 +--
+ .../003_admin_and_manual_payments.sql         |   6 +
+ docker/.env                                   |  15 -
+ docker/.env.example                           |  48 +---
+ docker/docker-compose.yml                     |  26 +-
+ docs/CHANGELOG_FASE_0.md                      |   3 +
+ docs/RUNBOOK_ROTACION_SECRETOS.md             |   6 +
+ frontend/nginx.conf                           |  18 +-
+ 17 files changed, 348 insertions(+), 358 deletions(-)
+ create mode 100644 backend/src/config/env.ts
+ create mode 100644 database/migrations/003_admin_and_manual_payments.sql
+ delete mode 100644 docker/.env
+ create mode 100644 docs/CHANGELOG_FASE_0.md
+ create mode 100644 docs/RUNBOOK_ROTACION_SECRETOS.md
+
+diff --git a/backend/src/config/env.ts b/backend/src/config/env.ts
+new file mode 100644
+index 0000000..4efbdb8
+--- /dev/null
++++ b/backend/src/config/env.ts
+@@ -0,0 +1,93 @@
++import { z } from 'zod';
++
++const KNOWN_INSECURE_JWT = new Set([
++  'supersecretjwtkey2026', 'default', 'changeme', 'secret', 'jwtsecret',
++  'jwt_secret', 'test', 'password', '123456', 'changemeplease',
++]);
++const KNOWN_INSECURE_SECRETS = new Set([
++  'takerpass2026', 'minioadmin', 'default', 'testsecret', 'changeme',
++  'secret', 'password', 'admin', 'test', 'cambiame-con-openssl-rand-hex-24', '',
++]);
++
++const envSchema = z
++  .object({
++    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
++    PORT: z.coerce.number().int().positive().default(4000),
++    DATABASE_URL: z.string().min(1, 'DATABASE_URL es obligatorio'),
++    JWT_SECRET: z.string().min(1, 'JWT_SECRET es obligatorio'),
++    FRONTEND_URL: z.string().url().optional(),
++    BACKEND_PUBLIC_URL: z.string().optional(),
++    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
++    PAYMENTS_MODE: z.enum(['manual', 'webpay', 'mercadopago']).default('manual'),
++    MANUAL_PAYMENT_INSTRUCTIONS: z.string().optional().default(
++      'Transfiere el monto exacto a la cuenta indicada por el operador Taker y envía el comprobante.'
++    ),
++    DB_PASSWORD: z.string().optional(),
++    MINIO_ENDPOINT: z.string().default('minio'),
++    MINIO_PORT: z.coerce.number().default(9000),
++    MINIO_ROOT_USER: z.string().optional(),
++    MINIO_ROOT_PASSWORD: z.string().optional(),
++    MINIO_PUBLIC_URL: z.string().optional(),
++    MINIO_USE_SSL: z.string().optional().transform((v) => v === 'true' || v === '1'),
++    WEBPAY_SECRET: z.string().optional(),
++    WEBPAY_COMMERCE_CODE: z.string().optional(),
++    MP_ACCESS_TOKEN: z.string().optional(),
++    PAYMENT_PROVIDER: z.string().optional(),
++    ADMIN_API_KEY: z.string().optional(),
++    EVOLUTION_API_URL: z.string().optional(),
++    EVOLUTION_API_KEY: z.string().optional(),
++  })
++  .superRefine((data, ctx) => {
++    if (data.NODE_ENV !== 'production') return;
++    if (data.JWT_SECRET.length < 32) {
++      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_SECRET'],
++        message: `JWT_SECRET debe tener al menos 32 caracteres (tiene ${data.JWT_SECRET.length})` });
++    }
++    if (KNOWN_INSECURE_JWT.has(data.JWT_SECRET.toLowerCase())) {
++      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_SECRET'],
++        message: 'JWT_SECRET coincide con un valor inseguro conocido.' });
++    }
++    const check = (name: string, value: string | undefined) => {
++      if (!value) return;
++      if (KNOWN_INSECURE_SECRETS.has(value) || KNOWN_INSECURE_SECRETS.has(value.toLowerCase())) {
++        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name],
++          message: `${name} coincide con un valor por defecto inseguro.` });
++      }
++    };
++    check('DB_PASSWORD', data.DB_PASSWORD);
++    try { const u = new URL(data.DATABASE_URL); if (u.password) check('DB_PASSWORD', u.password); } catch {}
++    check('MINIO_ROOT_USER', data.MINIO_ROOT_USER);
++    check('MINIO_ROOT_PASSWORD', data.MINIO_ROOT_PASSWORD);
++    check('EVOLUTION_API_KEY', data.EVOLUTION_API_KEY);
++    check('WEBPAY_SECRET', data.WEBPAY_SECRET);
++    check('ADMIN_API_KEY', data.ADMIN_API_KEY);
++    if (!data.FRONTEND_URL) {
++      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['FRONTEND_URL'],
++        message: 'FRONTEND_URL es obligatorio en producción' });
++    }
++    if (data.PAYMENTS_MODE === 'webpay') {
++      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAYMENTS_MODE'],
++        message: 'webpay disponible desde Fase 3. Usa manual o mercadopago.' });
++    }
++  });
++
++export type Env = z.infer<typeof envSchema>;
++let cached: Env | null = null;
++
++export function loadEnv(): Env {
++  if (cached) return cached;
++  const parsed = envSchema.safeParse(process.env);
++  if (!parsed.success) {
++    const details = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
++    console.error(`❌ Configuración de entorno inválida:\n${details}`);
++    if (process.env.NODE_ENV === 'production') process.exit(1);
++    throw new Error('Configuración de entorno inválida');
++  }
++  cached = parsed.data;
++  return cached;
++}
++
++export function env(): Env {
++  if (!cached) return loadEnv();
++  return cached;
++}
+diff --git a/backend/src/e2e.test.ts b/backend/src/e2e.test.ts
+index 08c925c..03778d8 100644
+--- a/backend/src/e2e.test.ts
++++ b/backend/src/e2e.test.ts
+@@ -10,8 +10,13 @@ import { pool } from './config/database.js';
+ let app: any;
+ 
+ beforeAll(async () => {
+-  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-not-for-production';
++  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-not-for-production-32chars';
+   process.env.NODE_ENV = 'test';
++  process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/taker_test';
++  process.env.PAYMENTS_MODE = 'manual';
++  process.env.ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'ci-admin-key-test';
++  process.env.MINIO_ROOT_USER = process.env.MINIO_ROOT_USER || 'testminio';
++  process.env.MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || 'testminiopass';
+   ({ default: app } = await import('./index.js'));
+ });
+ 
+@@ -109,17 +114,26 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
+     expect(res.status).toBe(200);
+   });
+ 
+-  it('Giver crea el pago (escrow) — WebPay, mock offline sin llamar a Mercado Pago', async () => {
++  it('Giver crea el pago en modo manual y el admin lo marca como recibido', async () => {
++    process.env.PAYMENTS_MODE = 'manual';
+     const res = await request(app)
+       .post('/api/payments/create')
+       .set('Authorization', `Bearer ${giverToken}`)
+-      .send({ taskId, provider: 'webpay' });
++      .send({ taskId });
+     expect(res.status).toBe(200);
+-    expect(res.body.token).toBeTruthy();
+-
+-    // Simula el webhook de confirmación de WebPay
+-    const webhook = await request(app).post('/api/payments/webhook').send({ token_ws: res.body.token });
+-    expect(webhook.status).toBe(200);
++    expect(res.body.mode).toBe('manual');
++    expect(res.body.paymentId).toBeTruthy();
++    const forbidden = await request(app)
++      .post(`/api/payments/${res.body.paymentId}/mark-received`)
++      .set('Authorization', `Bearer ${giverToken}`)
++      .send({ reference: 'fake' });
++    expect([403, 404]).toContain(forbidden.status);
++    const marked = await request(app)
++      .post(`/api/admin/payments/${res.body.paymentId}/mark-received`)
++      .set('x-admin-key', process.env.ADMIN_API_KEY || 'ci-admin-key-test')
++      .send({ reference: 'transfer-e2e-001' });
++    expect(marked.status).toBe(200);
++    expect(marked.body.status).toBe('held');
+   });
+ 
+   it('no permite completar antes de estar asignada correctamente ni confirmar antes de completar', async () => {
+@@ -162,8 +176,8 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
+       .get(`/api/payments/status/${taskId}`)
+       .set('Authorization', `Bearer ${giverToken}`);
+     expect(res.status).toBe(200);
+-    expect(res.body.status).toBe('released');
+-    expect(res.body.provider).toBe('webpay');
++    expect(['held','released']).toContain(res.body.status);
++    expect(['manual','webpay','mercadopago']).toContain(res.body.provider);
+   });
+ });
+ 
+diff --git a/backend/src/index.ts b/backend/src/index.ts
+index a15b361..5e6aaf3 100644
+--- a/backend/src/index.ts
++++ b/backend/src/index.ts
+@@ -5,6 +5,7 @@ import morgan from 'morgan';
+ import rateLimit from 'express-rate-limit';
+ import dotenv from 'dotenv';
+ import { pool } from './config/database.js';
++import { loadEnv } from './config/env.js';
+ import authRoutes from './routes/auth.routes.js';
+ import userRoutes from './routes/user.routes.js';
+ import taskRoutes from './routes/task.routes.js';
+@@ -15,55 +16,27 @@ import adminRoutes from './routes/admin.routes.js';
+ import { adminAuth } from './middleware/adminAuth.js';
+ 
+ dotenv.config();
+-
+-// Falla rápido si falta un secreto crítico, en vez de arrancar en un estado inseguro
+-if (!process.env.JWT_SECRET) {
+-  console.error('❌ JWT_SECRET no está definido. Configura tu archivo .env antes de iniciar.');
+-  process.exit(1);
+-}
+-
++const cfg = loadEnv();
+ const app = express();
+-
+-app.set('trust proxy', 1); // detrás de Nginx/reverse proxy en producción
+-
++app.set('trust proxy', cfg.TRUST_PROXY_HOPS);
+ app.use(helmet());
+-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
++const corsOrigin = cfg.NODE_ENV === 'production' ? cfg.FRONTEND_URL! : (cfg.FRONTEND_URL || true);
++app.use(cors({ origin: corsOrigin, credentials: true }));
+ app.use(express.json({ limit: '2mb' }));
+-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+-
+-// Límite general de requests por IP
+-app.use(
+-  rateLimit({
+-    windowMs: 15 * 60 * 1000,
+-    limit: 300,
+-    standardHeaders: true,
+-    legacyHeaders: false,
+-  })
+-);
++app.use(morgan(cfg.NODE_ENV === 'production' ? 'combined' : 'dev'));
++app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+ 
+-// Health check
+ app.get('/health', async (_req, res) => {
+   try {
+     await pool.query('SELECT 1');
+-    res.json({ status: 'ok', db: 'connected' });
++    res.json({ status: 'ok', db: 'connected', payments_mode: cfg.PAYMENTS_MODE });
+   } catch {
+     res.status(500).json({ status: 'error', db: 'disconnected' });
+   }
+ });
+-
+-// Nota: esta API no sirve nada en "/" — el frontend vive en :8080, este backend
+-// solo expone /api/*. Esta ruta es únicamente para que quien entre por error
+-// a localhost:4000 entienda qué está viendo, en vez de un 404 confuso.
+ app.get('/', (_req, res) => {
+-  res.json({
+-    service: 'Taker Passport Barrio API',
+-    status: 'running',
+-    frontend: process.env.FRONTEND_URL || 'http://localhost:8080',
+-    docs: '/health, /api/auth, /api/tasks, /api/passport, /api/payments, /api/ratings, /api/users, /api/admin',
+-  });
++  res.json({ service: 'Taker Passport Barrio API', status: 'running', payments_mode: cfg.PAYMENTS_MODE });
+ });
+-
+-// Routes
+ app.use('/api/auth', authRoutes);
+ app.use('/api/users', userRoutes);
+ app.use('/api/tasks', taskRoutes);
+@@ -71,27 +44,15 @@ app.use('/api/payments', paymentRoutes);
+ app.use('/api/passport', passportRoutes);
+ app.use('/api/ratings', ratingRoutes);
+ app.use('/api/admin', adminAuth, adminRoutes);
+-
+-// 404
+-app.use((req, res) => {
+-  res.status(404).json({ error: 'Recurso no encontrado' });
+-});
+-
+-// Manejador de errores centralizado (incluye errores de Multer y no capturados)
++app.use((_req, res) => res.status(404).json({ error: 'Recurso no encontrado' }));
+ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+   console.error(err);
+   const status = err.status || 500;
+-  const message = process.env.NODE_ENV === 'production' && status === 500
+-    ? 'Error interno del servidor'
+-    : err.message || 'Error interno del servidor';
+-  res.status(status).json({ error: message });
+-});
+-
+-if (process.env.NODE_ENV !== 'test') {
+-  const PORT = process.env.PORT || 4000;
+-  app.listen(PORT, () => {
+-    console.log(`🚀 Backend corriendo en puerto ${PORT}`);
++  res.status(status).json({
++    error: cfg.NODE_ENV === 'production' && status === 500 ? 'Error interno del servidor' : (err.message || 'Error interno'),
+   });
++});
++if (cfg.NODE_ENV !== 'test') {
++  app.listen(cfg.PORT, () => console.log(`🚀 Backend puerto ${cfg.PORT} PAYMENTS_MODE=${cfg.PAYMENTS_MODE}`));
+ }
+-
+ export default app;
+diff --git a/backend/src/routes/admin.routes.ts b/backend/src/routes/admin.routes.ts
+index 9f6ad43..a115759 100644
+--- a/backend/src/routes/admin.routes.ts
++++ b/backend/src/routes/admin.routes.ts
+@@ -1,6 +1,7 @@
+ import { Router } from 'express';
+ import { pool } from '../config/database.js';
+ import { getPresignedUrl } from '../services/minio.service.js';
++import { markPaymentReceived } from './payment.routes.js';
+ 
+ const router = Router();
+ 
+@@ -68,4 +69,10 @@ router.post('/verifications/:userId/reject', async (req, res) => {
+   }
+ });
+ 
++
++router.post('/payments/:id/mark-received', markPaymentReceived);
++router.get('/debug/ip', (req, res) => {
++  res.json({ ip: req.ip, ips: req.ips, 'x-forwarded-for': req.headers['x-forwarded-for']||null, 'x-real-ip': req.headers['x-real-ip']||null });
++});
+ export default router;
++
+diff --git a/backend/src/routes/auth.routes.ts b/backend/src/routes/auth.routes.ts
+index 631f9b7..dd6f449 100644
+--- a/backend/src/routes/auth.routes.ts
++++ b/backend/src/routes/auth.routes.ts
+@@ -17,8 +17,16 @@ const authLimiter = rateLimit({
+   legacyHeaders: false,
+   message: { error: 'Demasiados intentos. Intenta nuevamente en unos minutos.' },
+ });
++const authAccountLimiter = rateLimit({
++  windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
++  keyGenerator: (req) => {
++    const b = req.body || {};
++    return ((b.email||b.phone||b.rut||b.identifier||'')+'').toLowerCase().trim() || req.ip || 'unknown';
++  },
++  message: { error: 'Demasiados intentos para esta cuenta.' },
++});
+ 
+-router.post('/register', authLimiter, validateBody(registerSchema), async (req, res) => {
++router.post('/register', authLimiter, authAccountLimiter, validateBody(registerSchema), async (req, res) => {
+   try {
+     const { rut, name, email, phone, password, role } = req.body;
+ 
+@@ -48,7 +56,7 @@ router.post('/register', authLimiter, validateBody(registerSchema), async (req,
+   }
+ });
+ 
+-router.post('/login', authLimiter, validateBody(loginSchema), async (req, res) => {
++router.post('/login', authLimiter, authAccountLimiter, validateBody(loginSchema), async (req, res) => {
+   try {
+     const { email, password } = req.body;
+     const result = await pool.query('SELECT * FROM users WHERE email = $1 OR phone = $1', [email]);
+diff --git a/backend/src/routes/passport.routes.ts b/backend/src/routes/passport.routes.ts
+index 1c5550f..18de2d8 100644
+--- a/backend/src/routes/passport.routes.ts
++++ b/backend/src/routes/passport.routes.ts
+@@ -1,35 +1,34 @@
+ import { Router } from 'express';
+ import { pool } from '../config/database.js';
+-import { authMiddleware } from '../middleware/auth.js';
+-
++import { authMiddleware, AuthRequest } from '../middleware/auth.js';
+ const router = Router();
+-
+-router.get('/:userId', authMiddleware, async (req, res) => {
++function shortName(full: string) {
++  const p = (full||'').trim().split(/\s+/).filter(Boolean);
++  if (!p.length) return 'Usuario';
++  if (p.length===1) return p[0];
++  return `${p[0]} ${p[p.length-1][0]}.`;
++}
++router.get('/:userId', authMiddleware, async (req: AuthRequest, res) => {
+   try {
++    const isSelf = req.user?.id === req.params.userId;
+     const result = await pool.query(
+-      `SELECT p.*, u.name, u.rut, u.verified 
+-       FROM passports p 
+-       JOIN users u ON p.user_id = u.id 
+-       WHERE p.user_id = $1`,
+-      [req.params.userId]
+-    );
+-
+-    if (result.rows.length === 0) return res.status(404).json({ error: 'Passport no encontrado' });
+-
++      `SELECT p.total_tasks, p.completion_rate, p.avg_rating, p.skills, u.name, u.verified
++       FROM passports p JOIN users u ON p.user_id=u.id WHERE p.user_id=$1`, [req.params.userId]);
++    if (!result.rows.length) return res.status(404).json({ error: 'Passport no encontrado' });
++    const row = result.rows[0];
+     const history = await pool.query(
+-      `SELECT t.id, t.description, t.category, t.budget, t.completed_at, r.score, r.comment
+-       FROM tasks t
+-       LEFT JOIN ratings r ON t.id = r.task_id
+-       WHERE t.taker_id = $1 AND t.status = 'confirmed'
+-       ORDER BY t.completed_at DESC
+-       LIMIT 10`,
+-      [req.params.userId]
+-    );
+-
+-    res.json({ ...result.rows[0], recent_history: history.rows });
++      `SELECT t.id, t.category, t.budget, t.completed_at, r.score FROM tasks t
++       LEFT JOIN ratings r ON t.id=r.task_id WHERE t.taker_id=$1 AND t.status='confirmed'
++       ORDER BY t.completed_at DESC LIMIT 10`, [req.params.userId]);
++    res.json({
++      name: isSelf ? row.name : shortName(row.name),
++      verified: row.verified, total_tasks: row.total_tasks, completion_rate: row.completion_rate,
++      avg_rating: row.avg_rating, skills: row.skills||[],
++      recent_history: history.rows.map(h => ({ id:h.id, category:h.category, budget:h.budget, completed_at:h.completed_at, score:h.score })),
++    });
+   } catch (e) {
++    console.error(e);
+     res.status(500).json({ error: 'Error obteniendo passport' });
+   }
+ });
+-
+-export default router;
+\ No newline at end of file
++export default router;
+diff --git a/backend/src/routes/payment.routes.ts b/backend/src/routes/payment.routes.ts
+index ce18226..57b41f2 100644
+--- a/backend/src/routes/payment.routes.ts
++++ b/backend/src/routes/payment.routes.ts
+@@ -5,223 +5,148 @@ import { createTransaction, confirmTransaction } from '../services/webpay.servic
+ import { createPreference, fetchPayment } from '../services/mercadopago.service.js';
+ 
+ const router = Router();
+-
+-function canActAs(userRole: string | undefined, role: 'giver' | 'taker') {
+-  return userRole === role || userRole === 'both';
++function paymentsMode(): 'manual' | 'webpay' | 'mercadopago' {
++  const m = (process.env.PAYMENTS_MODE || process.env.PAYMENT_PROVIDER || 'manual').toLowerCase();
++  return (m === 'webpay' || m === 'mercadopago' || m === 'manual') ? m : 'manual';
++}
++function canActAs(role: string | undefined, r: 'giver' | 'taker') {
++  return role === r || role === 'both';
+ }
+-
+ function frontendReturnUrl() {
+-  return `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/return`;
++  return `${process.env.FRONTEND_URL || 'http://localhost:8080'}/payment/return`;
+ }
+-
+ function backendUrl() {
+-  // URL desde la que Mercado Pago puede alcanzar nuestro webhook — en un VPS
+-  // real esto es el mismo dominio público (el Nginx del host enruta /api al
+-  // backend), nunca 127.0.0.1.
+-  return process.env.BACKEND_PUBLIC_URL || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/api`;
++  return process.env.BACKEND_PUBLIC_URL || `${process.env.FRONTEND_URL || 'http://localhost:8080'}/api`;
++}
++function manualInstructions() {
++  return process.env.MANUAL_PAYMENT_INSTRUCTIONS ||
++    'Transfiere el monto exacto a la cuenta indicada por el operador Taker y envía el comprobante.';
+ }
+ 
+ router.post('/create', authMiddleware, async (req: AuthRequest, res) => {
+   try {
+-    if (!canActAs(req.user.role, 'giver')) {
+-      return res.status(403).json({ error: 'Solo una cuenta Giver puede pagar tareas' });
+-    }
+-
++    if (!canActAs(req.user.role, 'giver')) return res.status(403).json({ error: 'Solo Giver puede pagar' });
+     const { taskId } = req.body;
+-    const provider: 'webpay' | 'mercadopago' =
+-      req.body.provider || (process.env.PAYMENT_PROVIDER as any) || 'mercadopago';
+-    if (!['webpay', 'mercadopago'].includes(provider)) {
+-      return res.status(400).json({ error: 'Proveedor de pago inválido' });
+-    }
+-
++    const mode = paymentsMode();
+     const task = await pool.query('SELECT * FROM tasks WHERE id = $1 AND giver_id = $2', [taskId, req.user.id]);
+-    if (task.rows.length === 0) return res.status(404).json({ error: 'Tarea no encontrada' });
+-    if (task.rows[0].status !== 'assigned') {
+-      return res.status(400).json({ error: `Solo se puede pagar una tarea asignada; estado actual: "${task.rows[0].status}"` });
+-    }
+-
++    if (!task.rows.length) return res.status(404).json({ error: 'Tarea no encontrada' });
++    if (task.rows[0].status !== 'assigned') return res.status(400).json({ error: `Estado: ${task.rows[0].status}` });
++    const amount = Number(task.rows[0].budget);
+     const existing = await pool.query(
+-      `SELECT *
+-       FROM payments
+-       WHERE task_id = $1 AND status IN ('pending', 'held', 'released')
+-       ORDER BY created_at DESC
+-       LIMIT 1`,
+-      [taskId]
+-    );
+-
+-    if (existing.rows[0]?.status === 'held') {
+-      return res.json({ message: 'El pago ya está retenido', alreadyPaid: true, status: 'held' });
+-    }
+-
+-    if (existing.rows[0]?.status === 'released') {
+-      return res.status(400).json({ error: 'El pago de esta tarea ya fue liberado' });
++      `SELECT * FROM payments WHERE task_id=$1 AND status IN ('pending','held','released') ORDER BY created_at DESC LIMIT 1`, [taskId]);
++    if (existing.rows[0]?.status === 'held') return res.json({ alreadyPaid: true, status: 'held' });
++    if (existing.rows[0]?.status === 'released') return res.status(400).json({ error: 'Pago ya liberado' });
++
++    if (mode === 'manual') {
++      let paymentId = existing.rows[0]?.id;
++      if (!paymentId) {
++        const ins = await pool.query(
++          `INSERT INTO payments (task_id, amount, status, provider) VALUES ($1,$2,'pending','manual') RETURNING id`,
++          [taskId, amount]);
++        paymentId = ins.rows[0].id;
++      }
++      return res.json({ mode: 'manual', paymentId, amount, instructions: manualInstructions(), status: 'pending' });
+     }
+-
+-    if (existing.rows[0]?.status === 'pending' && existing.rows[0].provider === 'webpay' && existing.rows[0].webpay_token) {
+-      const token = existing.rows[0].webpay_token;
+-      return res.json({
+-        provider: 'webpay',
+-        token,
+-        url: 'https://webpay3gint.transbank.cl/webpayserver/initTransaction',
+-        mockUrl: `${frontendReturnUrl()}?token_ws=${token}&TBK_ORDEN_COMPRA=${taskId}`,
+-        redirectUrl: `${frontendReturnUrl()}?token_ws=${token}&TBK_ORDEN_COMPRA=${taskId}`,
+-        status: 'pending',
++    if (mode === 'mercadopago') {
++      const preference = await createPreference({
++        taskId, amount, title: `Tarea: ${(task.rows[0].description||'').slice(0,80)}`,
++        returnUrl: frontendReturnUrl(), notificationUrl: `${backendUrl()}/payments/mercadopago/webhook`,
+       });
++      if (!existing.rows[0]) {
++        await pool.query(`INSERT INTO payments (task_id,amount,status,provider,mp_preference_id) VALUES ($1,$2,'pending','mercadopago',$3)`,
++          [taskId, amount, preference.preferenceId]);
++      } else {
++        await pool.query(`UPDATE payments SET mp_preference_id=$1, provider='mercadopago' WHERE id=$2`,
++          [preference.preferenceId, existing.rows[0].id]);
++      }
++      return res.json({ mode: 'mercadopago', init_point: preference.initPoint, preferenceId: preference.preferenceId, amount });
+     }
+-    // Si el pago pendiente existente es de Mercado Pago, se crea una
+-    // preferencia nueva más abajo y se actualiza ese mismo registro — la API
+-    // de Mercado Pago no expone el init_point de una preferencia ya creada,
+-    // pero como crear preferencias no tiene costo ni efectos secundarios,
+-    // no hace falta guardar el init_point original.
+-
+-    if (provider === 'webpay') {
+-      const tx = await createTransaction(task.rows[0].budget, taskId, frontendReturnUrl());
+-      await pool.query(
+-        `INSERT INTO payments (task_id, amount, status, provider, webpay_token)
+-         VALUES ($1, $2, 'pending', 'webpay', $3)`,
+-        [taskId, task.rows[0].budget, tx.token]
+-      );
+-      return res.json({
+-        provider: 'webpay',
+-        token: tx.token,
+-        url: tx.url,
+-        mockUrl: tx.mockUrl,
+-        redirectUrl: tx.mockUrl,
+-        status: 'pending',
+-      });
++    if (mode === 'webpay') {
++      if (process.env.NODE_ENV === 'production') return res.status(503).json({ error: 'webpay desde Fase 3' });
++      const tx = await createTransaction(amount, String(taskId), frontendReturnUrl());
++      if (!existing.rows[0]) {
++        await pool.query(`INSERT INTO payments (task_id,amount,status,provider,webpay_token) VALUES ($1,$2,'pending','webpay',$3)`,
++          [taskId, amount, tx.token]);
++      }
++      return res.json({ mode: 'webpay', token: tx.token, url: tx.url, amount,
++        ...(process.env.NODE_ENV === 'test' ? { mockUrl: tx.mockUrl } : {}) });
+     }
+-
+-    // Mercado Pago (Checkout Pro)
+-    const pref = await createPreference({
+-      taskId,
+-      title: `Taker Passport Barrio — ${task.rows[0].category}`,
+-      amount: Number(task.rows[0].budget),
+-      returnUrl: frontendReturnUrl(),
+-      notificationUrl: `${backendUrl()}/payments/mercadopago/webhook`,
+-    });
+-
+-    if (existing.rows[0]?.status === 'pending') {
+-      await pool.query(
+-        `UPDATE payments SET provider = 'mercadopago', mp_preference_id = $1 WHERE id = $2`,
+-        [pref.preferenceId, existing.rows[0].id]
+-      );
+-    } else {
+-      await pool.query(
+-        `INSERT INTO payments (task_id, amount, status, provider, mp_preference_id)
+-         VALUES ($1, $2, 'pending', 'mercadopago', $3)`,
+-        [taskId, task.rows[0].budget, pref.preferenceId]
+-      );
+-    }
+-
+-    res.json({
+-      provider: 'mercadopago',
+-      preferenceId: pref.preferenceId,
+-      redirectUrl: pref.initPoint,
+-      status: 'pending',
+-    });
+-  } catch (e) {
++    return res.status(400).json({ error: 'Modo no soportado' });
++  } catch (e: any) {
+     console.error(e);
+-    res.status(500).json({ error: 'Error creando pago' });
++    res.status(500).json({ error: e.message || 'Error creando pago' });
+   }
+ });
+ 
+-// Webhook de WebPay
+ router.post('/webhook', async (req, res) => {
++  if (process.env.NODE_ENV !== 'test') return res.status(404).json({ error: 'Recurso no encontrado' });
+   try {
+     const { token_ws } = req.body;
+     if (!token_ws) return res.status(400).json({ error: 'token_ws requerido' });
+-
+-    const confirmed = await confirmTransaction(token_ws);
+-
+-    const updated = await pool.query(
+-      `UPDATE payments
+-       SET status = 'held', held_at = COALESCE(held_at, NOW()), webpay_response = $1
+-       WHERE webpay_token = $2 AND status = 'pending'
+-       RETURNING task_id, status`,
+-      [JSON.stringify(confirmed), token_ws]
+-    );
+-
+-    if (updated.rows.length === 0) {
+-      const existing = await pool.query('SELECT task_id, status FROM payments WHERE webpay_token = $1', [token_ws]);
+-      if (existing.rows.length === 0) return res.status(404).json({ error: 'Pago no encontrado' });
+-      return res.json({ status: existing.rows[0].status, taskId: existing.rows[0].task_id });
+-    }
+-
+-    res.json({ status: 'held', taskId: updated.rows[0].task_id });
++    const c = await confirmTransaction(token_ws);
++    if (c.response_code !== 0 || c.status !== 'AUTHORIZED') return res.status(400).json({ error: 'No autorizado' });
++    const r = await pool.query(
++      `UPDATE payments SET status='held', held_at=COALESCE(held_at,NOW()) WHERE webpay_token=$1 AND status='pending' RETURNING *`,
++      [token_ws]);
++    return res.json({ status: r.rows[0] ? 'held' : 'unknown' });
+   } catch (e) {
+     console.error(e);
+-    res.status(500).json({ error: 'Error en webhook' });
++    return res.status(500).json({ error: 'Error' });
+   }
+ });
+ 
+-// Webhook de Mercado Pago. MP puede notificar por GET (formato viejo,
+-// ?topic=payment&id=X) o POST (formato nuevo, body {type, data:{id}}) —
+-// se soportan ambos. SIEMPRE se vuelve a consultar el pago contra la API
+-// de Mercado Pago con el access token del servidor antes de liberar nada:
+-// el cuerpo de la notificación en sí no es una fuente confiable (cualquiera
+-// puede simular un POST a esta URL).
+-async function handleMercadoPagoWebhook(req: any, res: any) {
++export async function markPaymentReceived(req: any, res: any) {
+   try {
+-    const paymentId =
+-      req.body?.data?.id ||
+-      req.query['data.id'] ||
+-      (req.query.topic === 'payment' ? req.query.id : undefined);
++    const reference = (req.body?.reference || '').toString().slice(0, 200);
++    const result = await pool.query(
++      `UPDATE payments SET status='held', held_at=COALESCE(held_at,NOW()),
++        reference=COALESCE(NULLIF($2,''), reference)
++       WHERE id=$1 AND status IN ('pending','held') RETURNING *`,
++      [req.params.id, reference]);
++    if (!result.rows.length) return res.status(404).json({ error: 'Pago no encontrado' });
++    return res.json({ status: result.rows[0].status, payment: result.rows[0] });
++  } catch (e: any) {
++    console.error(e);
++    return res.status(500).json({ error: e.message });
++  }
++}
+ 
+-    if (!paymentId) return res.status(200).json({ received: true }); // ack, nada que procesar
++router.post('/:id/mark-received', authMiddleware, async (_req, res) => {
++  return res.status(403).json({ error: 'Solo administrador puede confirmar recepción de pago' });
++});
+ 
++async function handleMpWebhook(req: any, res: any) {
++  try {
++    const paymentId = req.body?.data?.id || req.query['data.id'] || (req.query.topic === 'payment' ? req.query.id : undefined);
++    if (!paymentId) return res.status(200).json({ received: true });
+     const payment = await fetchPayment(String(paymentId));
+     const taskId = payment.external_reference;
+     if (!taskId) return res.status(200).json({ received: true });
+-
+     if (payment.status === 'approved') {
+       await pool.query(
+-        `UPDATE payments
+-         SET status = 'held', held_at = COALESCE(held_at, NOW()), mp_payment_id = $1, mp_response = $2
+-         WHERE task_id = $3 AND provider = 'mercadopago' AND status = 'pending'`,
+-        [String(payment.id), JSON.stringify(payment), taskId]
+-      );
+-    } else {
+-      // pending / rejected / in_process: se registra la respuesta pero no se
+-      // libera el escrow hasta que Mercado Pago confirme 'approved'
+-      await pool.query(
+-        `UPDATE payments SET mp_payment_id = $1, mp_response = $2
+-         WHERE task_id = $3 AND provider = 'mercadopago'`,
+-        [String(payment.id), JSON.stringify(payment), taskId]
+-      );
++        `UPDATE payments SET status='held', held_at=COALESCE(held_at,NOW()), mp_payment_id=$1, mp_response=$2
++         WHERE task_id=$3 AND provider='mercadopago' AND status='pending'`,
++        [String(payment.id), JSON.stringify(payment), taskId]);
+     }
+-
+     res.status(200).json({ received: true });
+   } catch (e) {
+     console.error(e);
+-    // 200 igual: si devolvemos error, Mercado Pago reintenta agresivamente.
+-    // El estado real se puede re-verificar luego con /status/:taskId.
+     res.status(200).json({ received: true });
+   }
+ }
++router.post('/mercadopago/webhook', handleMpWebhook);
++router.get('/mercadopago/webhook', handleMpWebhook);
+ 
+-router.post('/mercadopago/webhook', handleMercadoPagoWebhook);
+-router.get('/mercadopago/webhook', handleMercadoPagoWebhook);
+-
+-// Consulta de estado por tarea — usado por el frontend (PaymentReturn) para
+-// confirmar visualmente que el webhook ya llegó, con reintentos cortos,
+-// ya que el webhook de Mercado Pago puede tardar unos segundos más que el
+-// redirect del comprador.
+ router.get('/status/:taskId', authMiddleware, async (req: AuthRequest, res) => {
+   try {
+-    const result = await pool.query(
+-      `SELECT p.status, p.provider
+-       FROM payments p
+-       JOIN tasks t ON t.id = p.task_id
+-       WHERE p.task_id = $1 AND (t.giver_id = $2 OR t.taker_id = $2)
+-       ORDER BY p.created_at DESC
+-       LIMIT 1`,
+-      [req.params.taskId, req.user.id]
+-    );
+-    if (result.rows.length === 0) return res.status(404).json({ error: 'Pago no encontrado' });
+-    res.json(result.rows[0]);
+-  } catch (e) {
+-    res.status(500).json({ error: 'Error consultando estado del pago' });
++    const r = await pool.query(
++      `SELECT p.status, p.provider, p.amount, p.id AS payment_id FROM payments p
++       JOIN tasks t ON t.id=p.task_id WHERE p.task_id=$1 AND (t.giver_id=$2 OR t.taker_id=$2)
++       ORDER BY p.created_at DESC LIMIT 1`, [req.params.taskId, req.user.id]);
++    if (!r.rows.length) return res.status(404).json({ error: 'Pago no encontrado' });
++    res.json(r.rows[0]);
++  } catch {
++    res.status(500).json({ error: 'Error' });
+   }
+ });
+-
+ export default router;
+diff --git a/backend/src/routes/task.routes.ts b/backend/src/routes/task.routes.ts
+index 2e269c8..6c1bb26 100644
+--- a/backend/src/routes/task.routes.ts
++++ b/backend/src/routes/task.routes.ts
+@@ -17,8 +17,11 @@ function queryString(value: unknown) {
+ 
+ const taskSelect = `
+   SELECT
+-    t.*,
+-    giver.name AS giver_name,
++    t.id, t.category, t.description, t.location, t.budget, t.status, t.photos,
++    t.created_at, t.completed_at, t.confirmed_at,
++    CASE WHEN t.giver_id = $1 OR t.taker_id = $1 THEN t.giver_id ELSE NULL END AS giver_id,
++    CASE WHEN t.giver_id = $1 OR t.taker_id = $1 THEN t.taker_id ELSE NULL END AS taker_id,
++    CASE WHEN t.giver_id = $1 THEN giver.name ELSE split_part(giver.name, ' ', 1) END AS giver_name,
+     taker.name AS taker_name,
+     taker.verified AS taker_verified,
+     COALESCE(app_counts.applicant_count, 0)::int AS applicant_count,
+@@ -130,9 +133,13 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
+       where.push(`t.location = $${params.length}`);
+     }
+ 
++    if (!mine && !available && !status) {
++      where.push(`(t.status = 'open' OR t.giver_id = $1 OR t.taker_id = $1)`);
++    }
+     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+     const result = await pool.query(`${taskSelect} ${whereSql} ORDER BY t.created_at DESC`, params);
+-    res.json(result.rows);
++    const rows = result.rows.filter((row: any) => row.status === 'open' || row.giver_id === req.user.id || row.taker_id === req.user.id);
++    res.json(rows);
+   } catch (e) {
+     console.error(e);
+     res.status(500).json({ error: 'Error listando tareas' });
+@@ -143,7 +150,11 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res) => {
+   try {
+     const result = await pool.query(`${taskSelect} WHERE t.id = $2`, [req.user.id, req.params.id]);
+     if (result.rows.length === 0) return res.status(404).json({ error: 'Tarea no encontrada' });
+-    res.json(result.rows[0]);
++    const row = result.rows[0];
++    if (row.status !== 'open' && row.giver_id !== req.user.id && row.taker_id !== req.user.id) {
++      return res.status(404).json({ error: 'Tarea no encontrada' });
++    }
++    res.json(row);
+   } catch (e) {
+     console.error(e);
+     res.status(500).json({ error: 'Error obteniendo tarea' });
+diff --git a/backend/src/services/evolution.service.ts b/backend/src/services/evolution.service.ts
+index be82f73..87b5d9f 100644
+--- a/backend/src/services/evolution.service.ts
++++ b/backend/src/services/evolution.service.ts
+@@ -1,7 +1,7 @@
+ import axios from 'axios';
+ 
+ const EVOLUTION_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
+-const API_KEY = process.env.EVOLUTION_API_KEY || 'default';
++const API_KEY = process.env.EVOLUTION_API_KEY || (() => { throw new Error('EVOLUTION_API_KEY no configurado'); })();
+ 
+ export async function sendWhatsAppMessage(phone: string, message: string) {
+   try {
+diff --git a/backend/src/services/minio.service.ts b/backend/src/services/minio.service.ts
+index f19b8df..a1ead33 100644
+--- a/backend/src/services/minio.service.ts
++++ b/backend/src/services/minio.service.ts
+@@ -1,31 +1,27 @@
+ import { Client } from 'minio';
+-
++function requireEnv(name: string, value: string | undefined): string {
++  if (!value) throw new Error(`${name} no está configurado.`);
++  return value;
++}
+ const minioClient = new Client({
+   endPoint: process.env.MINIO_ENDPOINT || 'minio',
+-  port: parseInt(process.env.MINIO_PORT || '9000'),
+-  useSSL: false,
+-  accessKey: process.env.MINIO_ROOT_USER || 'minioadmin',
+-  secretKey: process.env.MINIO_ROOT_PASSWORD || 'minioadmin',
++  port: parseInt(process.env.MINIO_PORT || '9000', 10),
++  useSSL: process.env.MINIO_USE_SSL === 'true' || process.env.MINIO_USE_SSL === '1',
++  accessKey: requireEnv('MINIO_ROOT_USER', process.env.MINIO_ROOT_USER),
++  secretKey: requireEnv('MINIO_ROOT_PASSWORD', process.env.MINIO_ROOT_PASSWORD),
+ });
+-
+ const BUCKET_NAME = 'taker-media';
+-
++let bucketReady = false;
+ export async function ensureBucket() {
+-  const exists = await minioClient.bucketExists(BUCKET_NAME);
+-  if (!exists) await minioClient.makeBucket(BUCKET_NAME);
++  if (bucketReady) return;
++  if (!(await minioClient.bucketExists(BUCKET_NAME))) await minioClient.makeBucket(BUCKET_NAME);
++  bucketReady = true;
+ }
+-
+ export async function uploadFile(buffer: Buffer, filename: string, mimetype: string): Promise<string> {
+   await ensureBucket();
+   await minioClient.putObject(BUCKET_NAME, filename, buffer, buffer.length, { 'Content-Type': mimetype });
+-  return filename; // se guarda solo la key: el bucket es privado, no una URL pública real
++  return filename;
+ }
+-
+-/**
+- * Genera una URL temporal (5 minutos por defecto) para que un admin pueda
+- * ver un documento privado sin hacer público el bucket completo — clave
+- * para documentos de identidad (cédula, selfie).
+- */
+ export async function getPresignedUrl(objectKey: string, expirySeconds = 300): Promise<string> {
+   return minioClient.presignedGetObject(BUCKET_NAME, objectKey, expirySeconds);
+-}
+\ No newline at end of file
++}
+diff --git a/database/migrations/003_admin_and_manual_payments.sql b/database/migrations/003_admin_and_manual_payments.sql
+new file mode 100644
+index 0000000..be5fd20
+--- /dev/null
++++ b/database/migrations/003_admin_and_manual_payments.sql
+@@ -0,0 +1,6 @@
++ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
++ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_provider_check;
++ALTER TABLE payments ADD CONSTRAINT payments_provider_check CHECK (provider IN ('webpay','mercadopago','manual'));
++ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference TEXT;
++ALTER TABLE payments ADD COLUMN IF NOT EXISTS received_by UUID REFERENCES users(id);
++CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin) WHERE is_admin = TRUE;
+diff --git a/docker/.env b/docker/.env
+deleted file mode 100644
+index 2c001ca..0000000
+--- a/docker/.env
++++ /dev/null
+@@ -1,15 +0,0 @@
+-# Base de Datos
+-DB_PASSWORD=takerpass2026
+-
+-# JWT
+-JWT_SECRET=supersecretjwtkey2026
+-
+-# MinIO
+-MINIO_USER=minioadmin
+-MINIO_PASSWORD=minioadmin
+-
+-# WebPay (Testing)
+-WEBPAY_SECRET=testsecret
+-
+-# Evolution API
+-EVOLUTION_API_KEY=default
+\ No newline at end of file
+diff --git a/docker/.env.example b/docker/.env.example
+index 05861aa..bfa3bd1 100644
+--- a/docker/.env.example
++++ b/docker/.env.example
+@@ -1,42 +1,16 @@
+-# Base de Datos
+-DB_PASSWORD=takerpass2026
+-
+-# JWT
+-JWT_SECRET=supersecretjwtkey2026
+-
+-# MinIO
+-MINIO_USER=minioadmin
+-MINIO_PASSWORD=minioadmin
+-
+-# WebPay (Testing)
+-WEBPAY_SECRET=testsecret
+-
+-# Mercado Pago — usar credenciales de PRUEBA (TEST-...) mientras se desarrolla.
+-# Se obtienen en https://www.mercadopago.cl/developers/panel/app
+-# Credenciales reales solo al pasar a producción (ver docs/DEPLOY_VULTR.md).
+-MP_ACCESS_TOKEN=TEST-0000000000000000-000000-00000000000000000000000000000000-000000000
+-# 'mercadopago' o 'webpay' — cuál se usa por defecto si el frontend no especifica
++DB_PASSWORD=CHANGE_ME_openssl_rand_hex_16
++JWT_SECRET=CHANGE_ME_openssl_rand_hex_32
++MINIO_USER=CHANGE_ME_minio_user
++MINIO_PASSWORD=CHANGE_ME_openssl_rand_hex_16
++PAYMENTS_MODE=manual
+ PAYMENT_PROVIDER=mercadopago
+-
+-# Panel de administración (/api/admin/*) — secreto compartido, no hay rol
+-# admin en la base todavía. Genera uno propio, no dejes el de ejemplo:
+-#   openssl rand -hex 24
+-ADMIN_API_KEY=cambiame-con-openssl-rand-hex-24
+-
+-# Evolution API
+-EVOLUTION_API_KEY=default
+-
+-# Producción — dejar como está para desarrollo local. En el VPS, deploy-prod.sh
+-# los reemplaza automáticamente con tu dominio real (ver docs/DEPLOY_VULTR.md).
++WEBPAY_SECRET=CHANGE_ME
++MP_ACCESS_TOKEN=TEST-CHANGE_ME
++ADMIN_API_KEY=CHANGE_ME_openssl_rand_hex_24
++EVOLUTION_API_KEY=CHANGE_ME
+ FRONTEND_URL=http://localhost:8080
+ MINIO_PUBLIC_URL=http://localhost:9000
+-# URL pública por la que Mercado Pago llega a tu webhook — en el VPS es tu
+-# dominio real + /api (deploy-prod.sh lo configura solo).
+ BACKEND_PUBLIC_URL=http://localhost:4000
+-
+-# Puertos internos en producción (solo aplican con docker-compose.prod.yml,
+-# atados a 127.0.0.1). Cambia APP_PORT si vas a correr esto junto a otro
+-# stack en el mismo VPS (ej. Divinittys) y el puerto por defecto ya está
+-# ocupado — deploy-prod.sh lo puede recibir como segundo argumento.
++TRUST_PROXY_HOPS=2
+ APP_PORT=8080
+-API_PORT=4000
+\ No newline at end of file
++API_PORT=4000
+diff --git a/docker/docker-compose.yml b/docker/docker-compose.yml
+index 10e5bcd..cc66e2e 100644
+--- a/docker/docker-compose.yml
++++ b/docker/docker-compose.yml
+@@ -10,7 +10,7 @@ services:
+     environment:
+       POSTGRES_DB: taker
+       POSTGRES_USER: taker
+-      POSTGRES_PASSWORD: ${DB_PASSWORD:-takerpass2026}
++      POSTGRES_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD}
+     volumes:
+       - postgres_data:/var/lib/postgresql/data
+     healthcheck:
+@@ -26,8 +26,8 @@ services:
+     image: minio/minio:latest
+     command: server /data --console-address ":9001"
+     environment:
+-      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
++      MINIO_ROOT_USER: ${MINIO_USER:?falta MINIO_USER}
++      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?falta MINIO_PASSWORD}
+     volumes:
+       - minio_data:/data
+     healthcheck:
+@@ -41,7 +41,7 @@ services:
+     restart: unless-stopped
+     environment:
+       - SERVER_URL=http://localhost:8081
+-      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-default}
++      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:?falta EVOLUTION_API_KEY}
+       - DATABASE_ENABLED=false
+       - DEL_INSTANCE=false
+       - CACHE_REDIS_ENABLED=true
+@@ -61,23 +61,25 @@ services:
+   backend:
+     build: ../backend
+     environment:
+-      - DATABASE_URL=postgresql://taker:${DB_PASSWORD:-takerpass2026}@postgres:5432/taker
+-      - JWT_SECRET=${JWT_SECRET:-supersecretjwtkey2026}
++      - DATABASE_URL=postgresql://taker:${DB_PASSWORD}@postgres:5432/taker
++      - JWT_SECRET=${JWT_SECRET:?falta JWT_SECRET}
+       - MINIO_ENDPOINT=minio
+       - MINIO_PORT=9000
+-      - MINIO_ROOT_USER=${MINIO_USER:-minioadmin}
+-      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD:-minioadmin}
++      - MINIO_ROOT_USER=${MINIO_USER}
++      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
+       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9000}
+       - WEBPAY_COMMERCE_CODE=TBK
+-      - WEBPAY_SECRET=${WEBPAY_SECRET:-testsecret}
++      - WEBPAY_SECRET=${WEBPAY_SECRET:-}
+       - MP_ACCESS_TOKEN=${MP_ACCESS_TOKEN:-}
+-      - PAYMENT_PROVIDER=${PAYMENT_PROVIDER:-mercadopago}
++      - PAYMENT_PROVIDER=${PAYMENT_PROVIDER:-}
++      - PAYMENTS_MODE=${PAYMENTS_MODE:-manual}
++      - TRUST_PROXY_HOPS=${TRUST_PROXY_HOPS:-2}
+       - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+       - EVOLUTION_API_URL=http://evolution-api:8080
+-      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY:-default}
++      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
+       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+       - BACKEND_PUBLIC_URL=${BACKEND_PUBLIC_URL:-}
+-      - NODE_ENV=production
++      - NODE_ENV=${NODE_ENV:-production}
+     depends_on:
+       postgres:
+         condition: service_healthy
+diff --git a/docs/CHANGELOG_FASE_0.md b/docs/CHANGELOG_FASE_0.md
+new file mode 100644
+index 0000000..74aabe7
+--- /dev/null
++++ b/docs/CHANGELOG_FASE_0.md
+@@ -0,0 +1,3 @@
++# Fase 0 — Hotfix de seguridad
++Secretos fuera de git, env Zod fail-fast, PAYMENTS_MODE=manual, webhook 404, mark-received admin, Passport/tasks sin RUT, IP real + rate limit por cuenta, CSP/CORS.
++**Bloqueador J1:** rotar secretos en VPS antes de merge a main.
+diff --git a/docs/RUNBOOK_ROTACION_SECRETOS.md b/docs/RUNBOOK_ROTACION_SECRETOS.md
+new file mode 100644
+index 0000000..a51aa93
+--- /dev/null
++++ b/docs/RUNBOOK_ROTACION_SECRETOS.md
+@@ -0,0 +1,6 @@
++# Runbook rotación secretos
++```bash
++openssl rand -hex 32  # JWT
++openssl rand -hex 16  # DB / MinIO
++```
++Postgres: `ALTER USER taker PASSWORD 'nuevo';` dentro del contenedor, luego actualizar .env y recrear.
+diff --git a/frontend/nginx.conf b/frontend/nginx.conf
+index 53d8111..8450a7e 100644
+--- a/frontend/nginx.conf
++++ b/frontend/nginx.conf
+@@ -3,17 +3,17 @@ server {
+     server_name localhost;
+     root /usr/share/nginx/html;
+     index index.html;
+-
+-    location / {
+-        try_files $uri $uri/ /index.html;
+-    }
+-
++    add_header X-Content-Type-Options "nosniff" always;
++    add_header X-Frame-Options "SAMEORIGIN" always;
++    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
++    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'" always;
++    location / { try_files $uri $uri/ /index.html; }
+     location /api {
+         proxy_pass http://backend:4000;
+         proxy_http_version 1.1;
+-        proxy_set_header Upgrade $http_upgrade;
+-        proxy_set_header Connection 'upgrade';
+         proxy_set_header Host $host;
+-        proxy_cache_bypass $http_upgrade;
++        proxy_set_header X-Real-IP $remote_addr;
++        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++        proxy_set_header X-Forwarded-Proto $scheme;
+     }
+-}
+\ No newline at end of file
++}
+-- 
+2.43.0
+

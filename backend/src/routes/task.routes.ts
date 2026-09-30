@@ -17,8 +17,11 @@ function queryString(value: unknown) {
 
 const taskSelect = `
   SELECT
-    t.*,
-    giver.name AS giver_name,
+    t.id, t.category, t.description, t.location, t.budget, t.status, t.photos,
+    t.created_at, t.completed_at, t.confirmed_at,
+    CASE WHEN t.giver_id = $1 OR t.taker_id = $1 THEN t.giver_id ELSE NULL END AS giver_id,
+    CASE WHEN t.giver_id = $1 OR t.taker_id = $1 THEN t.taker_id ELSE NULL END AS taker_id,
+    CASE WHEN t.giver_id = $1 THEN giver.name ELSE split_part(giver.name, ' ', 1) END AS giver_name,
     taker.name AS taker_name,
     taker.verified AS taker_verified,
     COALESCE(app_counts.applicant_count, 0)::int AS applicant_count,
@@ -130,9 +133,13 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
       where.push(`t.location = $${params.length}`);
     }
 
+    if (!mine && !available && !status) {
+      where.push(`(t.status = 'open' OR t.giver_id = $1 OR t.taker_id = $1)`);
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const result = await pool.query(`${taskSelect} ${whereSql} ORDER BY t.created_at DESC`, params);
-    res.json(result.rows);
+    const rows = result.rows.filter((row: any) => row.status === 'open' || row.giver_id === req.user.id || row.taker_id === req.user.id);
+    res.json(rows);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Error listando tareas' });
@@ -143,7 +150,11 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(`${taskSelect} WHERE t.id = $2`, [req.user.id, req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Tarea no encontrada' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    if (row.status !== 'open' && row.giver_id !== req.user.id && row.taker_id !== req.user.id) {
+      return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+    res.json(row);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Error obteniendo tarea' });

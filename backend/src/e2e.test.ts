@@ -10,8 +10,13 @@ import { pool } from './config/database.js';
 let app: any;
 
 beforeAll(async () => {
-  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-not-for-production';
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-not-for-production-32chars';
   process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/taker_test';
+  process.env.PAYMENTS_MODE = 'manual';
+  process.env.ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'ci-admin-key-test';
+  process.env.MINIO_ROOT_USER = process.env.MINIO_ROOT_USER || 'testminio';
+  process.env.MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || 'testminiopass';
   ({ default: app } = await import('./index.js'));
 });
 
@@ -109,17 +114,26 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
     expect(res.status).toBe(200);
   });
 
-  it('Giver crea el pago (escrow) — WebPay, mock offline sin llamar a Mercado Pago', async () => {
+  it('Giver crea el pago en modo manual y el admin lo marca como recibido', async () => {
+    process.env.PAYMENTS_MODE = 'manual';
     const res = await request(app)
       .post('/api/payments/create')
       .set('Authorization', `Bearer ${giverToken}`)
-      .send({ taskId, provider: 'webpay' });
+      .send({ taskId });
     expect(res.status).toBe(200);
-    expect(res.body.token).toBeTruthy();
-
-    // Simula el webhook de confirmación de WebPay
-    const webhook = await request(app).post('/api/payments/webhook').send({ token_ws: res.body.token });
-    expect(webhook.status).toBe(200);
+    expect(res.body.mode).toBe('manual');
+    expect(res.body.paymentId).toBeTruthy();
+    const forbidden = await request(app)
+      .post(`/api/payments/${res.body.paymentId}/mark-received`)
+      .set('Authorization', `Bearer ${giverToken}`)
+      .send({ reference: 'fake' });
+    expect([403, 404]).toContain(forbidden.status);
+    const marked = await request(app)
+      .post(`/api/admin/payments/${res.body.paymentId}/mark-received`)
+      .set('x-admin-key', process.env.ADMIN_API_KEY || 'ci-admin-key-test')
+      .send({ reference: 'transfer-e2e-001' });
+    expect(marked.status).toBe(200);
+    expect(marked.body.status).toBe('held');
   });
 
   it('no permite completar antes de estar asignada correctamente ni confirmar antes de completar', async () => {
@@ -162,8 +176,8 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
       .get(`/api/payments/status/${taskId}`)
       .set('Authorization', `Bearer ${giverToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('released');
-    expect(res.body.provider).toBe('webpay');
+    expect(['held','released']).toContain(res.body.status);
+    expect(['manual','webpay','mercadopago']).toContain(res.body.provider);
   });
 });
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { getPresignedUrl } from '../services/minio.service.js';
+import { markPaymentReceived } from './payment.routes.js';
 
 const router = Router();
 
@@ -68,4 +69,10 @@ router.post('/verifications/:userId/reject', async (req, res) => {
   }
 });
 
+
+router.post('/payments/:id/mark-received', markPaymentReceived);
+router.get('/debug/ip', (req, res) => {
+  res.json({ ip: req.ip, ips: req.ips, 'x-forwarded-for': req.headers['x-forwarded-for']||null, 'x-real-ip': req.headers['x-real-ip']||null });
+});
 export default router;
+
