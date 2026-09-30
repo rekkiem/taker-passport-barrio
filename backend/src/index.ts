@@ -11,6 +11,8 @@ import taskRoutes from './routes/task.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import passportRoutes from './routes/passport.routes.js';
 import ratingRoutes from './routes/rating.routes.js';
+import adminRoutes from './routes/admin.routes.js';
+import { adminAuth } from './middleware/adminAuth.js';
 
 dotenv.config();
 
@@ -57,7 +59,7 @@ app.get('/', (_req, res) => {
     service: 'Taker Passport Barrio API',
     status: 'running',
     frontend: process.env.FRONTEND_URL || 'http://localhost:8080',
-    docs: '/health, /api/auth, /api/tasks, /api/passport, /api/payments, /api/ratings, /api/users',
+    docs: '/health, /api/auth, /api/tasks, /api/passport, /api/payments, /api/ratings, /api/users, /api/admin',
   });
 });
 
@@ -68,6 +70,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/passport', passportRoutes);
 app.use('/api/ratings', ratingRoutes);
+app.use('/api/admin', adminAuth, adminRoutes);
 
 // 404
 app.use((req, res) => {

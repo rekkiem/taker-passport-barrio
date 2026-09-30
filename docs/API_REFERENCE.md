@@ -88,17 +88,53 @@ Solo válido si la tarea está `completed` y existe un pago en estado `held`. Li
 
 ## Payments
 
+Dos proveedores disponibles: `mercadopago` (por defecto) y `webpay` (modo testing TBK). El campo `provider` en el body de `/create` es opcional; si no se envía, se usa `PAYMENT_PROVIDER` del entorno.
+
 ### `POST /payments/create` — JWT (Giver)
 ```json
-{ "taskId": "uuid-de-la-tarea" }
+{ "taskId": "uuid-de-la-tarea", "provider": "mercadopago" }
 ```
-Crea una transacción WebPay (modo testing TBK) y un registro `payments` en estado `pending`.
+Crea la transacción/preferencia con el proveedor elegido y un registro `payments` en estado `pending`. Responde siempre con un campo `redirectUrl` — es el que debe usar el frontend para redirigir al Giver, sin importar el proveedor:
+```json
+{ "provider": "mercadopago", "redirectUrl": "https://www.mercadopago.cl/checkout/...", "status": "pending" }
+```
+Si ya existe un pago `held` para esa tarea, responde `{ "alreadyPaid": true, "status": "held" }` en vez de crear uno nuevo.
 
-### `POST /payments/webhook`
+### `POST /payments/webhook` — WebPay
 ```json
 { "token_ws": "token-recibido-de-webpay" }
 ```
 Sin auth (llamado por Transbank). Marca el pago como `held` (fondos retenidos en escrow).
+
+### `POST /payments/mercadopago/webhook` — Mercado Pago
+Sin auth (llamado por Mercado Pago; acepta tanto notificación GET con `?data.id=` como POST con body `{data:{id}}`). Nunca confía en el cuerpo de la notificación: siempre vuelve a consultar el pago contra la API de Mercado Pago con el access token del servidor antes de marcarlo `held`. Configurar la URL pública de este endpoint (`BACKEND_PUBLIC_URL`) es obligatorio para que Mercado Pago pueda alcanzarlo — ver `docs/DEPLOY_VULTR.md`.
+
+### `GET /payments/status/:taskId` — JWT (Giver o Taker de esa tarea)
+Consulta el estado real del pago. Usado por el frontend (`PaymentReturn.tsx`) para confirmar visualmente que el webhook ya procesó el pago, con reintentos cortos — el webhook de Mercado Pago puede llegar unos segundos después del redirect del comprador.
+```json
+{ "status": "held", "provider": "mercadopago" }
+```
+
+---
+
+## Admin
+
+Todas las rutas bajo `/admin` requieren el header `x-admin-key` con el valor de `ADMIN_API_KEY` del entorno. Si esa variable no está configurada, todas responden `503` (falla cerrado, no abierto). No hay rol "admin" en la tabla de usuarios todavía — este es un mecanismo mínimo para el MVP, pensado para uno o dos operadores, no para un equipo de soporte.
+
+### `GET /admin/verifications/pending`
+Lista Takers con documentos de identidad subidos, pendientes de revisión.
+
+### `GET /admin/verifications/:userId/documents`
+Genera URLs prefirmadas de MinIO (5 minutos de validez) para ver la cédula y la selfie subidas. El bucket es privado — estas URLs son la única forma de acceder a esos archivos.
+```json
+{ "documentUrl": "https://...", "selfieUrl": "https://...", "expiresInSeconds": 300 }
+```
+
+### `POST /admin/verifications/:userId/approve`
+Marca `verified = true`.
+
+### `POST /admin/verifications/:userId/reject`
+Limpia los documentos subidos para que el Taker pueda volver a intentarlo.
 
 ---
 

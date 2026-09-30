@@ -5,5 +5,6 @@ FROM postgres:16-alpine
 # los datos de prueba se cargan aparte y a mano (ver README) para no terminar
 # con usuarios de contraseña conocida ('password123') en un despliegue de producción.
 COPY migrations/001_initial.sql /docker-entrypoint-initdb.d/01_schema.sql
+COPY migrations/002_mercadopago.sql /docker-entrypoint-initdb.d/02_mercadopago.sql
 
 RUN chmod 644 /docker-entrypoint-initdb.d/*.sql

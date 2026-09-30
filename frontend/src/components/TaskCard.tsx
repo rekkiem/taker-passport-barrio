@@ -57,7 +57,7 @@ export default function TaskCard({ task, onUpdate }: { task: any; onUpdate: () =
         onUpdate();
         return;
       }
-      if (data.mockUrl) window.location.href = data.mockUrl;
+      if (data.redirectUrl) window.location.href = data.redirectUrl;
     });
 
   const handleConfirm = () =>

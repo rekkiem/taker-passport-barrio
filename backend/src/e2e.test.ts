@@ -109,11 +109,11 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
     expect(res.status).toBe(200);
   });
 
-  it('Giver crea el pago (escrow)', async () => {
+  it('Giver crea el pago (escrow) — WebPay, mock offline sin llamar a Mercado Pago', async () => {
     const res = await request(app)
       .post('/api/payments/create')
       .set('Authorization', `Bearer ${giverToken}`)
-      .send({ taskId });
+      .send({ taskId, provider: 'webpay' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
 
@@ -155,5 +155,53 @@ describe('Flujo end-to-end: Giver crea tarea, Taker la completa, pago se libera'
     expect(passport.body.total_tasks).toBe(1);
     expect(Number(passport.body.avg_rating)).toBe(5);
     expect(Number(passport.body.earnings)).toBe(15000);
+  });
+
+  it('GET /payments/status/:taskId refleja el estado real del pago', async () => {
+    const res = await request(app)
+      .get(`/api/payments/status/${taskId}`)
+      .set('Authorization', `Bearer ${giverToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('released');
+    expect(res.body.provider).toBe('webpay');
+  });
+});
+
+describe('Panel de administración (verificación de identidad)', () => {
+  const originalAdminKey = process.env.ADMIN_API_KEY;
+
+  afterAll(() => {
+    process.env.ADMIN_API_KEY = originalAdminKey;
+  });
+
+  it('responde 503 si ADMIN_API_KEY no está configurado', async () => {
+    delete process.env.ADMIN_API_KEY;
+    const res = await request(app).get('/api/admin/verifications/pending');
+    expect(res.status).toBe(503);
+  });
+
+  it('responde 401 con una key incorrecta', async () => {
+    process.env.ADMIN_API_KEY = 'secreto-correcto';
+    const res = await request(app)
+      .get('/api/admin/verifications/pending')
+      .set('x-admin-key', 'secreto-incorrecto');
+    expect(res.status).toBe(401);
+  });
+
+  it('lista verificaciones pendientes con la key correcta', async () => {
+    process.env.ADMIN_API_KEY = 'secreto-correcto';
+    const res = await request(app)
+      .get('/api/admin/verifications/pending')
+      .set('x-admin-key', 'secreto-correcto');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it('404 al aprobar un usuario inexistente', async () => {
+    process.env.ADMIN_API_KEY = 'secreto-correcto';
+    const res = await request(app)
+      .post('/api/admin/verifications/00000000-0000-0000-0000-000000000000/approve')
+      .set('x-admin-key', 'secreto-correcto');
+    expect(res.status).toBe(404);
   });
 });

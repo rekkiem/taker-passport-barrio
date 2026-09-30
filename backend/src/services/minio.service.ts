@@ -18,5 +18,14 @@ export async function ensureBucket() {
 export async function uploadFile(buffer: Buffer, filename: string, mimetype: string): Promise<string> {
   await ensureBucket();
   await minioClient.putObject(BUCKET_NAME, filename, buffer, buffer.length, { 'Content-Type': mimetype });
-  return `${process.env.MINIO_PUBLIC_URL || 'http://localhost:9000'}/${BUCKET_NAME}/${filename}`;
+  return filename; // se guarda solo la key: el bucket es privado, no una URL pública real
+}
+
+/**
+ * Genera una URL temporal (5 minutos por defecto) para que un admin pueda
+ * ver un documento privado sin hacer público el bucket completo — clave
+ * para documentos de identidad (cédula, selfie).
+ */
+export async function getPresignedUrl(objectKey: string, expirySeconds = 300): Promise<string> {
+  return minioClient.presignedGetObject(BUCKET_NAME, objectKey, expirySeconds);
 }

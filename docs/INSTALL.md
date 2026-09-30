@@ -58,8 +58,20 @@ npm test
 
 Requiere que el esquema (`database/migrations/001_initial.sql`) esté aplicado en la base `taker_test`. El pipeline de CI (`.github/workflows/ci.yml`) hace esto automáticamente con un contenedor de Postgres efímero.
 
-## Conectar WhatsApp (Evolution API)
+## Conectar Mercado Pago
 
+1. Crea una cuenta de vendedor en [mercadopago.cl](https://www.mercadopago.cl) si no tienes una.
+2. En el [panel de desarrolladores](https://www.mercadopago.cl/developers/panel/app), crea una aplicación y copia el **Access Token de prueba** (`TEST-...`) para desarrollo.
+3. Pégalo en `docker/.env` como `MP_ACCESS_TOKEN`.
+4. Para simular un pago en modo prueba, Mercado Pago provee [tarjetas y usuarios de prueba](https://www.mercadopago.cl/developers/es/docs/checkout-pro/additional-content/your-integrations/test/cards) — nunca uses una tarjeta real contra el access token de prueba.
+5. El webhook (`/api/payments/mercadopago/webhook`) necesita ser alcanzable públicamente para que Mercado Pago pueda notificar. En desarrollo local esto no funciona sin un túnel (ej. `ngrok http 4000` y usar esa URL como `BACKEND_PUBLIC_URL`); en producción, `deploy-prod.sh` ya deja esto configurado con tu dominio real.
+6. Cuando pases a producción, reemplaza `MP_ACCESS_TOKEN` por el access token **real** de tu cuenta (sin el prefijo `TEST-`) — recién ahí se cobra dinero de verdad.
+
+## Panel de administración (verificación de identidad)
+
+No hay interfaz visual todavía — se opera con `curl` o Postman contra `/api/admin/*`, usando el header `x-admin-key` con el valor de `ADMIN_API_KEY` de tu `.env`. Ver `docs/API_REFERENCE.md` para el detalle de cada endpoint.
+
+## Conectar WhatsApp (Evolution API)
 1. Levantar el stack con Docker (`evolution-api` corre en el puerto `8081` del host, `8080` interno).
 2. Abrir el panel en `http://localhost:8081` y crear una instancia.
 3. Escanear el código QR con la app de WhatsApp del número que actuará como gateway.
